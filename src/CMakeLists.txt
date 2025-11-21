@@ -28,13 +28,15 @@ target_link_libraries(Viewer
     glm::glm
     glad
     imgui
+    CUDA::cuda_driver
+    CUDA::cudart
 )
 
 target_include_directories(Viewer PRIVATE
     ${PROJECT_SOURCE_DIR}/src
-    # ${PROJECT_SOURCE_DIR}/external/glfw/include
-    # ${PROJECT_SOURCE_DIR}/external/nvrhi/include
-    # ${PROJECT_SOURCE_DIR}/external/glm
-    # ${PROJECT_SOURCE_DIR}/external/imgui
-    # ${PROJECT_SOURCE_DIR}/external/tinyply/source
+    ${PROJECT_SOURCE_DIR}/external/glfw/include
+    ${PROJECT_SOURCE_DIR}/external/glm
+    ${PROJECT_SOURCE_DIR}/external/imgui
+    ${PROJECT_SOURCE_DIR}/external/tinyply/source
+    ${OPTIX_INCLUDE_DIR}
 )

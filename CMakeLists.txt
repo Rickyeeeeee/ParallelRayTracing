@@ -26,6 +26,9 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ---- External dependencies ----
+if (BUILD_RENDERER_CUDA_MEGA)
+    find_package(CUDAToolkit REQUIRED)
+endif()
 
 # OpenGL + GLFW
 if (BUILD_VIEWER_APP)
