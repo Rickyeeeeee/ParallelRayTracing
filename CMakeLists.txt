@@ -61,6 +61,7 @@ endif()
 
 # ---- Subdirectories ----
 
+add_subdirectory(external)
 add_subdirectory(src)
 
 # if (BUILD_RENDERER_CPU)

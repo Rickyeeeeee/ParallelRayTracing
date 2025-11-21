@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 3.5)
 
 file(GLOB CPP_SOURCE 
     *.cpp
-    # core/*.cpp
+    core/*.cpp
     # RayTracing/*.cpp
     # RasterEngine/*.cpp
 )
 
 file (GLOB HEADER_SOURCE 
     *.h
-    # core/*.h
+    core/*.h
     # RayTracing/*.h
     # RasterEngine/*.h
 )
@@ -24,9 +24,10 @@ set_target_properties(Viewer PROPERTIES
 )
 
 target_link_libraries(Viewer
-    # glfw
-    # glm::glm
-    # imgui
+    glfw
+    glm::glm
+    glad
+    imgui
 )
 
 target_include_directories(Viewer PRIVATE

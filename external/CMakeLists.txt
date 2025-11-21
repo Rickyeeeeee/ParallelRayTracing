@@ -1,0 +1,6 @@
+add_subdirectory(glfw)
+add_subdirectory(glm)
+add_subdirectory(glad)
+include(imgui.cmake)
+# add_subdirectory(assimp)
+add_subdirectory(tinyply)
