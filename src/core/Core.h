@@ -1,6 +1,13 @@
 #pragma once
 
 #include <stdint.h>
+#include <string>
+
+#ifndef ASSETS_DIR
+#define ASSETS_DIR "."
+#endif
+
+const std::string assetRoot = ASSETS_DIR;
 
 // #define GLM_FORCE_INTRINSICS
 // #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES

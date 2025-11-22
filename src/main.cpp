@@ -1,4 +1,8 @@
 // main.cpp
+#include <core/core.h>
+#include <opengl/opengl_utils.h>
+#include <opengl/opengl_renderer.h>
+
 #include <cstdio>
 #include <iostream>
 
@@ -57,9 +61,7 @@ bool checkOptiX() {
 }
 
 int main() {
-    // --------------------------
-    // Initialize GLFW + OpenGL
-    // --------------------------
+
     if (!glfwInit()) {
         std::cerr << "[Error] Failed to initialize GLFW\n";
         return -1;
@@ -69,8 +71,10 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    uint32_t windowWidth = 1280;
+    uint32_t windowHeight = 720;
     GLFWwindow* window =
-        glfwCreateWindow(1280, 720, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
+        glfwCreateWindow(windowWidth, windowHeight, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
 
     if (!window) {
         std::cerr << "[Error] Failed to create GLFW window\n";
@@ -109,6 +113,32 @@ int main() {
 
     bool show_demo = false;
 
+
+
+    // Initialization
+    OpenGLTextureRenderer openglRenderer{};
+
+    uint8_t* data = new uint8_t[windowWidth * windowHeight * 4];
+    for (int y = 0; y < windowHeight; y++)
+    {
+        for (int x = 0; x < windowWidth; x++)
+        {
+            int idx = 4 * (y * windowWidth + x);
+            data[idx + 0] = static_cast<uint8_t>(200);
+            data[idx + 1] = static_cast<uint8_t>(200);
+            data[idx + 2] = static_cast<uint8_t>(200);
+            data[idx + 3] = static_cast<uint8_t>(255);
+        }
+    }
+
+    std::shared_ptr<OpenGLTexture> frames[2]; 
+    for (int i = 0; i < 2; i++)
+    {
+        frames[i] = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
+        frames[i]->SetData(data);
+    }
+    
+
     // --------------------------
     // Main Loop
     // --------------------------
@@ -144,6 +174,9 @@ int main() {
         glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
         glClearColor(0.15f, 0.18f, 0.22f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+        
+        openglRenderer.Draw(*frames[0]);
+        
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);

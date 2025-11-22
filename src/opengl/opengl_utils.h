@@ -1,7 +1,8 @@
 #pragma once
 #include <Core/Core.h>
-
 #include <glad/glad.h>
+
+#include <memory>
 
 class OpenGLTexture
 {
