@@ -6,6 +6,7 @@
 #include <backend/cpu/renderer.h>
 #include <backend/cuda_megakernel/renderer.h>
 #include <backend/cuda_wavefront/renderer.h>
+#include <backend/optix/renderer.h>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -143,6 +144,8 @@ int main() {
     rendererOptions.push_back({ "CPU (std::async)", std::make_shared<CPURenderer>() });
     rendererOptions.push_back({ "CUDA Megakernel", std::make_shared<CudaMegakernelRenderer>() });
     rendererOptions.push_back({ "CUDA Wavefront", std::make_shared<CudaWavefrontRenderer>() });
+    if (optixOK)
+        rendererOptions.push_back({ "OptiX (dummy)", std::make_shared<OptixRenderer>() });
 
     for (auto& option : rendererOptions)
         option.Instance->Init(film, scene, camera);

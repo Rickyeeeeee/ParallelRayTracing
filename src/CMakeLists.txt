@@ -8,10 +8,12 @@ file(GLOB CPP_SOURCE
     backend/cpu/*.cpp
     backend/cuda_megakernel/*.cpp
     backend/cuda_wavefront/*.cpp
+    backend/optix/*.cpp
     backend/*.cu
     backend/cpu/*.cu
     backend/cuda_megakernel/*.cu
     backend/cuda_wavefront/*.cu
+    backend/optix/*.cu
     imgui_impl/*.cpp
     opengl/*.cpp
     )
@@ -23,6 +25,7 @@ file (GLOB HEADER_SOURCE
     backend/cpu/*.h
     backend/cuda_megakernel/*.h
     backend/cuda_wavefront/*.h
+    backend/optix/*.h
     imgui_impl/*.h
     opengl/*.h
 )
