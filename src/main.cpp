@@ -4,6 +4,8 @@
 #include <opengl/opengl_renderer.h>
 #include <core/film.h>
 #include <backend/cpu/renderer.h>
+#include <backend/cuda_megakernel/renderer.h>
+#include <backend/cuda_wavefront/renderer.h>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -20,8 +22,11 @@
 #include <optix_function_table_definition.h>
 #include <optix_stubs.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
+#include <memory>
+#include <vector>
 
 bool checkCUDA() {
     int deviceCount = 0;
@@ -113,27 +118,8 @@ int main() {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 450");
 
-    bool show_demo = false;
-
-
-
     // Initialization
     Film film{ windowWidth, windowHeight };
-    float* rgbData = new float[windowWidth * windowHeight * 3];
-    for (int y = 0; y < windowHeight; y++)
-    {
-        for (int x = 0; x < windowWidth; x++)
-        {
-            int idx = 3 * (y * windowWidth + x);
-            rgbData[idx + 0] = 1.0f;
-            rgbData[idx + 1] = 0.5f;
-            rgbData[idx + 2] = 0.5f;
-        }
-    }
-    
-    film.AddSampleBuffer(rgbData);
-    film.UpdateDisplay();
-
     OpenGLTextureRenderer openglRenderer{};
     Scene scene{};
 
@@ -146,17 +132,36 @@ int main() {
         static_cast<float>(windowHeight),
         100.0f
     };
-    auto cpuRenderer = std::make_shared<CPURenderer>();
-    cpuRenderer->Init(film, scene, camera);
 
-    
+    struct RendererOption
+    {
+        const char* Label;
+        std::shared_ptr<Renderer> Instance;
+    };
+
+    std::vector<RendererOption> rendererOptions;
+    rendererOptions.push_back({ "CPU (std::async)", std::make_shared<CPURenderer>() });
+    rendererOptions.push_back({ "CUDA Megakernel", std::make_shared<CudaMegakernelRenderer>() });
+    rendererOptions.push_back({ "CUDA Wavefront", std::make_shared<CudaWavefrontRenderer>() });
+
+    for (auto& option : rendererOptions)
+        option.Instance->Init(film, scene, camera);
+
+    film.Clear();
+
+    int selectedRenderer = 0;
+
     std::shared_ptr<OpenGLTexture> frame = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
     
 
     // --------------------------
     // Main Loop
     // --------------------------
+    double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
+        double currentTime = glfwGetTime();
+        double delta = currentTime - lastTime;
+
         glfwPollEvents();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -165,6 +170,8 @@ int main() {
 
         // System check window
         ImGui::Begin("System Diagnostics");
+
+        ImGui::Text("FPS: %.3f", 1.0 / delta);
 
         ImGui::Text("OpenGL: %s", (const char*)glGetString(GL_VERSION));
 
@@ -178,6 +185,16 @@ int main() {
         ImGui::TextColored(optixOK ? ImVec4(0,1,0,1) : ImVec4(1,0,0,1),
                            optixOK ? "OptiX Loaded Successfully" : "OptiX Failed");
 
+        ImGui::Separator();
+        ImGui::Text("Renderer");
+        for (int i = 0; i < static_cast<int>(rendererOptions.size()); ++i)
+        {
+            if (ImGui::RadioButton(rendererOptions[i].Label, selectedRenderer == i))
+            {
+                selectedRenderer = i;
+                film.Clear();
+            }
+        }
 
         ImGui::End();
 
@@ -189,15 +206,26 @@ int main() {
         glClearColor(0.15f, 0.18f, 0.22f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         
-        cpuRenderer->ProgressiveRender();
+        Renderer* activeRenderer = nullptr;
+        if (!rendererOptions.empty())
+        {
+            const int clampedIndex = std::clamp(selectedRenderer, 0, static_cast<int>(rendererOptions.size()) - 1);
+            activeRenderer = rendererOptions[clampedIndex].Instance.get();
+            selectedRenderer = clampedIndex;
+        }
+
+        if (activeRenderer)
+            activeRenderer->ProgressiveRender();
         film.UpdateDisplay();
         frame->SetData(film.GetDisplayData());
         openglRenderer.Draw(*frame);
         
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window);
         glfwSwapInterval(1);
+        glfwSwapBuffers(window);
+
+        lastTime = currentTime;
     }
 
     // Cleanup

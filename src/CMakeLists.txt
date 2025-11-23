@@ -2,9 +2,16 @@ cmake_minimum_required(VERSION 3.5)
 
 file(GLOB CPP_SOURCE 
     *.cpp
+    *.cu
     core/*.cpp
     backend/*.cpp
     backend/cpu/*.cpp
+    backend/cuda_megakernel/*.cpp
+    backend/cuda_wavefront/*.cpp
+    backend/*.cu
+    backend/cpu/*.cu
+    backend/cuda_megakernel/*.cu
+    backend/cuda_wavefront/*.cu
     imgui_impl/*.cpp
     opengl/*.cpp
     )
@@ -14,6 +21,8 @@ file (GLOB HEADER_SOURCE
     core/*.h
     backend/*.h
     backend/cpu/*.h
+    backend/cuda_megakernel/*.h
+    backend/cuda_wavefront/*.h
     imgui_impl/*.h
     opengl/*.h
 )

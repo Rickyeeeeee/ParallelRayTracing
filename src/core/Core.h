@@ -7,6 +7,10 @@
 #define ASSETS_DIR "."
 #endif
 
+#define QUAL_CPU_GPU __host__ __device__
+#define QUAL_GPU __device__
+
+
 const std::string assetRoot = ASSETS_DIR;
 
 // #define GLM_FORCE_INTRINSICS
