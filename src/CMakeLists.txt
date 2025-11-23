@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.5)
 file(GLOB CPP_SOURCE 
     *.cpp
     core/*.cpp
+    backend/*.cpp
+    backend/cpu/*.cpp
     imgui_impl/*.cpp
     opengl/*.cpp
     )
@@ -10,6 +12,8 @@ file(GLOB CPP_SOURCE
 file (GLOB HEADER_SOURCE 
     *.h
     core/*.h
+    backend/*.h
+    backend/cpu/*.h
     imgui_impl/*.h
     opengl/*.h
 )
@@ -29,15 +33,16 @@ target_compile_definitions(Viewer PRIVATE
     ASSETS_DIR="${PROJECT_ROOT_DIR}/assets"
 )
 
-set_target_properties(Viewer PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
-)
+# set_target_properties(Viewer PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+# )
 
 target_link_libraries(Viewer
     glfw
     glm::glm
     glad
     imgui
+    tinyply
     CUDA::cuda_driver
     CUDA::cudart
 )

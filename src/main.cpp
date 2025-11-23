@@ -2,9 +2,8 @@
 #include <core/core.h>
 #include <opengl/opengl_utils.h>
 #include <opengl/opengl_renderer.h>
-
-#include <cstdio>
-#include <iostream>
+#include <core/film.h>
+#include <backend/cpu/renderer.h>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -20,6 +19,9 @@
 #include <optix.h>
 #include <optix_function_table_definition.h>
 #include <optix_stubs.h>
+
+#include <cstdio>
+#include <iostream>
 
 bool checkCUDA() {
     int deviceCount = 0;
@@ -71,8 +73,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    uint32_t windowWidth = 1280;
-    uint32_t windowHeight = 720;
+    uint32_t windowWidth = 800;
+    uint32_t windowHeight = 600;
     GLFWwindow* window =
         glfwCreateWindow(windowWidth, windowHeight, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
 
@@ -116,27 +118,39 @@ int main() {
 
 
     // Initialization
-    OpenGLTextureRenderer openglRenderer{};
-
-    uint8_t* data = new uint8_t[windowWidth * windowHeight * 4];
+    Film film{ windowWidth, windowHeight };
+    float* rgbData = new float[windowWidth * windowHeight * 3];
     for (int y = 0; y < windowHeight; y++)
     {
         for (int x = 0; x < windowWidth; x++)
         {
-            int idx = 4 * (y * windowWidth + x);
-            data[idx + 0] = static_cast<uint8_t>(200);
-            data[idx + 1] = static_cast<uint8_t>(200);
-            data[idx + 2] = static_cast<uint8_t>(200);
-            data[idx + 3] = static_cast<uint8_t>(255);
+            int idx = 3 * (y * windowWidth + x);
+            rgbData[idx + 0] = 1.0f;
+            rgbData[idx + 1] = 0.5f;
+            rgbData[idx + 2] = 0.5f;
         }
     }
+    
+    film.AddSampleBuffer(rgbData);
+    film.UpdateDisplay();
 
-    std::shared_ptr<OpenGLTexture> frames[2]; 
-    for (int i = 0; i < 2; i++)
-    {
-        frames[i] = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
-        frames[i]->SetData(data);
-    }
+    OpenGLTextureRenderer openglRenderer{};
+    Scene scene{};
+
+    auto center = glm::vec3{ 5.0f, 5.0f, 8.0f };
+    auto focus = glm::vec3{ 0.0f };
+    Camera camera {
+        center,
+        glm::normalize(focus - center),
+        static_cast<float>(windowWidth),
+        static_cast<float>(windowHeight),
+        100.0f
+    };
+    auto cpuRenderer = std::make_shared<CPURenderer>();
+    cpuRenderer->Init(film, scene, camera);
+
+    
+    std::shared_ptr<OpenGLTexture> frame = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
     
 
     // --------------------------
@@ -175,11 +189,15 @@ int main() {
         glClearColor(0.15f, 0.18f, 0.22f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         
-        openglRenderer.Draw(*frames[0]);
+        cpuRenderer->ProgressiveRender();
+        film.UpdateDisplay();
+        frame->SetData(film.GetDisplayData());
+        openglRenderer.Draw(*frame);
         
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
+        glfwSwapInterval(1);
     }
 
     // Cleanup

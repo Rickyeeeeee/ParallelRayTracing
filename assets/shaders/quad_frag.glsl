@@ -6,5 +6,6 @@ uniform sampler2D uTexture;
 
 void main()
 {
-    FragColor = texture(uTexture, vTexCoord);
+    // Flip V so top-left film origin matches GL texture space
+    FragColor = texture(uTexture, vec2(vTexCoord.x, 1.0 - vTexCoord.y));
 }
