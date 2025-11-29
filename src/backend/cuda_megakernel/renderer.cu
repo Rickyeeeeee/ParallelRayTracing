@@ -107,29 +107,29 @@ __global__ void GPU_RayTracing(float* colors, GPUCamera * cam, GPUSphere* sphere
 
     // Method 2: Manual Normalize
     // in device code
-    float px = cam->position.x;
-    float py = cam->position.y;
-    float pz = cam->position.z;
+    // float px = cam->position.x;
+    // float py = cam->position.y;
+    // float pz = cam->position.z;
 
-    float lenSq = px * px + py * py + pz * pz;
+    // float lenSq = px * px + py * py + pz * pz;
 
-    // avoid divide-by-zero
-    if (lenSq > 0.0f) {
-        float invLen = rsqrtf(lenSq);   // 1 / sqrt(lenSq), CUDA intrinsic
+    // // avoid divide-by-zero
+    // if (lenSq > 0.0f) {
+    //     float invLen = rsqrtf(lenSq);   // 1 / sqrt(lenSq), CUDA intrinsic
 
-        float nx = px * invLen;
-        float ny = py * invLen;
-        float nz = pz * invLen;
+    //     float nx = px * invLen;
+    //     float ny = py * invLen;
+    //     float nz = pz * invLen;
 
-        colors[base + 0] = nx;
-        colors[base + 1] = ny;
-        colors[base + 2] = nz;
-    } else {
-        // fallback if cam->position == (0,0,0)
-        colors[base + 0] = 0.0f;
-        colors[base + 1] = 0.0f;
-        colors[base + 2] = 0.0f;
-    }
+    //     colors[base + 0] = nx;
+    //     colors[base + 1] = ny;
+    //     colors[base + 2] = nz;
+    // } else {
+    //     // fallback if cam->position == (0,0,0)
+    //     colors[base + 0] = 0.0f;
+    //     colors[base + 1] = 0.0f;
+    //     colors[base + 2] = 0.0f;
+    // }
 }
 
 }

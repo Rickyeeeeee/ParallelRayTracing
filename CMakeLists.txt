@@ -86,3 +86,17 @@ add_subdirectory(src)
 # if (BUILD_VIEWER_APP)
 #     add_subdirectory(src/app)
 # endif()
+
+# Fix IntelliSense in Visual Studio
+if (MSVC)
+    target_compile_options(Viewer PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            --expt-relaxed-constexpr
+            --extended-lambda
+        >
+        $<$<COMPILE_LANGUAGE:CXX>:
+            /EHsc
+            /Zc:__cplusplus
+        >
+    )
+endif()
