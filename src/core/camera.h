@@ -6,6 +6,7 @@
 class Camera
 {
 public:
+    QUAL_CPU_GPU
     Camera(const glm::vec3& position, const glm::vec3& front, float width, float height, float focal=1.0f)
         : m_Position(position), m_Width(width), m_Height(height), m_Focal(focal)
     {
@@ -17,23 +18,26 @@ public:
     // Rotate the camera around the focus point 
     // The focus point is the intersection of the camera's view direction and the xz plane
     // Rotate the camera position and then update the view direction accordingly
+    QUAL_CPU_GPU
     void Rotate(float angleX, float angleY)
     {
         m_RotationVelocity += glm::vec2(angleX, angleY);
     }
 
     // Offset the camera position with mouse dragging
+    QUAL_CPU_GPU
     void Translate(float offsetX, float offsetY)
     {
         m_TranslationVelocity += glm::vec2(offsetX, offsetY); // accumulate input
     }
     
-
+    QUAL_CPU_GPU
     void Zoom(float offset)
     {
         m_ZoomVelocity += offset; // Accumulate input
     }
 
+    QUAL_CPU_GPU
     void Update(float deltaTime)
     {
         // --- Zoom ---
@@ -80,6 +84,7 @@ public:
         }
     }
 
+    QUAL_CPU_GPU
     glm::mat4 GetViewProjection() const
     {
         glm::mat4 view = glm::lookAtRH(m_Position, m_Position + m_Front, m_Up);
@@ -87,14 +92,15 @@ public:
         glm::mat4 proj = glm::perspectiveRH_ZO(1.0f, m_Width / m_Height, 0.01f, 1000.0f);
         return proj * view;
     }
+    
+    QUAL_CPU_GPU glm::vec3 GetPosition() const { return m_Position; }
+    QUAL_CPU_GPU glm::vec3 GetViewDir() const { return m_Front; }
+    QUAL_CPU_GPU float GetWidth() const { return m_Width; }
+    QUAL_CPU_GPU float GetHeight() const { return m_Height; }
+    QUAL_CPU_GPU float GetAspectRatio() const { return m_Height / m_Width; }
+    QUAL_CPU_GPU float GetFocal() const { return m_Focal; }
 
-    glm::vec3 GetPosition() const { return m_Position; }
-    glm::vec3 GetViewDir() const { return m_Front; }
-    float GetWidth() const { return m_Width; }
-    float GetHeight() const { return m_Height; }
-    float GetAspectRatio() const { return m_Height / m_Width; }
-    float GetFocal() const { return m_Focal; }
-
+    QUAL_CPU_GPU
     Ray GetCameraRay(float px, float py) const 
     {
         // Normalize pixel coordinates to [-1, 1]

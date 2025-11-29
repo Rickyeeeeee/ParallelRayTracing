@@ -104,6 +104,7 @@ public:
     }
 
    const auto getCircles() const { return m_Primitives.getCircles(); }
+   const auto getQuads() const { return m_Primitives.getQuads(); }
 
 private:
     PrimitiveList m_Primitives;

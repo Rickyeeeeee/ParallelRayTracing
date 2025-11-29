@@ -5,15 +5,17 @@
 TODO
 
 - Optimize the cam buffer (call once in init(), and don't need to malloc and delete the buffer)
+- Optimize camera in camera.h for GPU compatibility
 - remove the hardcoded depth
 - Optimize the Intersect Function
+    - Not using CPU since too many vector and virtual, 
+      waiting for other implementation before rebase
     - tMin hardcoded
-    - if else thing
 */
 
 namespace
 {
-QUAL_GPU inline float  IntersectGPUSphere(const GPUSphere& sphere, Ray &pray, SurfaceInteraction* intersect) {
+QUAL_GPU inline void IntersectGPUSphere(const GPUSphere& sphere, const Ray &pray, SurfaceInteraction* intersect) {
     Ray ray;
     ray.Origin = TransformPoint(sphere.transform.GetInvMat(), pray.Origin);
     ray.Direction = TransformNormal(sphere.transform.GetMat(), pray.Direction);
@@ -29,8 +31,8 @@ QUAL_GPU inline float  IntersectGPUSphere(const GPUSphere& sphere, Ray &pray, Su
 
     if (discriminant >= 0.0f)
     {
-        float t1 = (-b + sqrtf(discriminant)) /( 2 * a);
-        float t2 = (-b - sqrtf(discriminant)) /( 2 * a);
+        float t1 = (-b + sqrtf(discriminant)) / 2 * a;
+        float t2 = (-b - sqrtf(discriminant)) / 2 * a;
         float t = 0.0f;
 
         intersect->HasIntersection = true;
@@ -65,17 +67,55 @@ QUAL_GPU inline float  IntersectGPUSphere(const GPUSphere& sphere, Ray &pray, Su
         intersect->HasIntersection = false;
     }
 
-    return discriminant;
+    intersect->Position = TransformPoint(sphere.transform.GetMat(), intersect->Position);
+    intersect->Normal = TransformNormal(sphere.transform.GetInvMat(), intersect->Normal);
 }
-__global__ void GPU_RayTracing(float* colors, GPUCamera * cam, GPUSphere* spheres)
+
+QUAL_GPU inline void IntersectGPUQuad(const GPUQuad& quad, const Ray &pray, SurfaceInteraction* intersect) {
+    Ray ray;
+    ray.Origin = TransformPoint(quad.transform.GetInvMat(), pray.Origin);
+    ray.Direction = TransformNormal(quad.transform.GetMat(), pray.Direction);
+
+    if (fabs(ray.Direction.y) < 1e-8f)
+    {
+        intersect->HasIntersection = false;
+        return;
+    }
+
+    auto t = -ray.Origin.y / ray.Direction.y;
+
+    auto p = ray.Origin + ray.Direction * t;
+
+    float halfWidth = quad.width / 2.0f;
+    float halfHeight = quad.height / 2.0f;
+
+    constexpr static float tMin = 0.001f;
+
+    if (t > tMin && (p.x * p.x < halfWidth * halfWidth) && (p.z * p.z < halfHeight * halfHeight))
+    {
+        intersect->HasIntersection = true;
+        intersect->Position = p;
+        intersect->IsFrontFace = ray.Origin.y > 0.0f;
+        intersect->Normal = intersect->IsFrontFace ? quad.normal : -quad.normal;
+    }
+    else
+    {
+        intersect->HasIntersection = false;
+    }
+    
+    intersect->Position = TransformPoint(quad.transform.GetMat(), intersect->Position);
+    intersect->Normal = TransformNormal(quad.transform.GetInvMat(), intersect->Normal);
+}
+
+__global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, GPUQuad* quads)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint32_t pixelCount = cam->width * cam->height;
+    const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
     if (idx >= pixelCount)
         return;
 
-    const uint32_t x = idx % cam->width;
-    const uint32_t y = idx / cam->width;
+    const uint32_t x = idx % (uint32_t)cam->GetWidth();
+    const uint32_t y = idx / cam->GetWidth();
 
     Ray ray = cam->GetCameraRay((float)x + 0.5f, (float)y + 0.5f);
     
@@ -89,47 +129,24 @@ __global__ void GPU_RayTracing(float* colors, GPUCamera * cam, GPUSphere* sphere
     float colorb = 0.0f;
     for (int i=0; i<4; ++i) {
         SurfaceInteraction intersect;
-        float det = IntersectGPUSphere(spheres[i], ray, &intersect);
+        IntersectGPUSphere(spheres[i], ray, &intersect);
         if (intersect.HasIntersection) {
             colora = 255.0f;
         }
-        else {
-            colorb = -det / 1000.0f;
+    }
+    for (int i=0; i<3; i++) {
+        SurfaceInteraction intersect;
+        IntersectGPUQuad(quads[i], ray, &intersect);
+        if (intersect.HasIntersection) {
+            colorb = 255.0f;
         }
     }
 
     // Method 1: GLM Normalize
     const uint32_t base = idx * 3;
-    glm::vec3 pos = glm::normalize(cam->position);
-    colors[base + 0] = pos.x;
-    colors[base + 1] = pos.y;
-    colors[base + 2] = pos.z;
-
-    // Method 2: Manual Normalize
-    // in device code
-    // float px = cam->position.x;
-    // float py = cam->position.y;
-    // float pz = cam->position.z;
-
-    // float lenSq = px * px + py * py + pz * pz;
-
-    // // avoid divide-by-zero
-    // if (lenSq > 0.0f) {
-    //     float invLen = rsqrtf(lenSq);   // 1 / sqrt(lenSq), CUDA intrinsic
-
-    //     float nx = px * invLen;
-    //     float ny = py * invLen;
-    //     float nz = pz * invLen;
-
-    //     colors[base + 0] = nx;
-    //     colors[base + 1] = ny;
-    //     colors[base + 2] = nz;
-    // } else {
-    //     // fallback if cam->position == (0,0,0)
-    //     colors[base + 0] = 0.0f;
-    //     colors[base + 1] = 0.0f;
-    //     colors[base + 2] = 0.0f;
-    // }
+    colors[base + 0] = colora;
+    colors[base + 1] = colorb;
+    colors[base + 2] = 0.0f;
 }
 
 }
@@ -161,11 +178,15 @@ void CudaMegakernelRenderer::ProgressiveRender()
     const uint32_t threadsPerBlock = 256;
     const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
 
-    // Data Parameters
-    GPUCamera* d_cam = CreateGPUCamera(m_Camera);
+    // Camera
+    Camera* d_cam;
+    cudaMalloc(&d_cam, sizeof(Camera));
+    cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    // Objects
     GPUSphere* spheres = ConvertCirclesToGPU();
+    GPUQuad* quads = ConvertQuadsToGPU();
 
-    GPU_RayTracing<<<blocks, threadsPerBlock>>>(deviceBuffer, d_cam, spheres);
+    GPU_RayTracing<<<blocks, threadsPerBlock>>>(deviceBuffer, d_cam, spheres, quads);
     cudaDeviceSynchronize();
     
     
@@ -204,27 +225,28 @@ GPUSphere* CudaMegakernelRenderer::ConvertCirclesToGPU() {
     return gs_ptr;
 }
 
-GPUCamera* CreateGPUCamera(const Camera* cam) {
-    GPUCamera gc{};
+GPUQuad* CudaMegakernelRenderer::ConvertQuadsToGPU() {
+    std::vector<GPUQuad> gq_list;
 
-    gc.position = cam->GetPosition();
-    gc.forward  = cam->GetViewDir();
+    const auto qlist = m_Scene->getQuads();
+    for (auto quad: qlist) {
+        auto _q = std::static_pointer_cast<SimplePrimitive>(quad);
+        Shape& _s = _q->GetShape();
+        Quad& q = dynamic_cast<Quad&>(_s);
 
-    glm::vec3 forward = cam->GetViewDir();
-    glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-    glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
-    glm::vec3 up = glm::normalize(glm::cross(right, forward));
+        GPUQuad gq;
+        gq.transform = _q->GetTransform();
+        gq.width = q.GetWidth();
+        gq.height = q.GetHeight();
+        gq.normal = q.GetNormal();
 
-    gc.right = right;
-    gc.up = up;
+        gq_list.push_back(gq);
+    }
 
-    gc.focal = cam->GetFocal();
-    gc.width  = cam->GetWidth();
-    gc.height = cam->GetHeight();
-    gc.focal  = cam->GetFocal();
+    GPUQuad* gq_ptr;
+    size_t size = sizeof(GPUQuad) * gq_list.size();
+    cudaMalloc(&gq_ptr, size);
+    cudaMemcpy(gq_ptr, gq_list.data(), size, cudaMemcpyHostToDevice);
 
-    GPUCamera* d_cam;
-    cudaMalloc(&d_cam, sizeof(GPUCamera));
-    cudaMemcpy(d_cam, &gc, sizeof(GPUCamera), cudaMemcpyHostToDevice);
-    return d_cam;
+    return gq_ptr;
 }

@@ -46,6 +46,10 @@ class Quad : public Shape
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
     virtual AABB GetAABB(Transform* transform) const override;
 
+    inline float GetWidth() const { return m_Width; }
+    inline float GetHeight() const { return m_Height; }
+    inline glm::vec3 GetNormal() const { return m_Normal; }
+
 private:
     float m_Width;
     float m_Height;
