@@ -13,8 +13,8 @@ void Circle::Intersect(const Ray &ray, SurfaceInteraction* intersect) const
 
     if (discriminant >= 0.0f)
     {
-        float t1 = (-b + sqrtf(discriminant)) / 2 * a;
-        float t2 = (-b - sqrtf(discriminant)) / 2 * a;
+        float t1 = (-b + sqrtf(discriminant)) / (2 * a);
+        float t2 = (-b - sqrtf(discriminant)) / (2 * a);
         float t = 0.0f;
 
         intersect->HasIntersection = true;

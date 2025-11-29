@@ -10,7 +10,6 @@
 #define QUAL_CPU_GPU __host__ __device__
 #define QUAL_GPU __device__
 
-
 const std::string assetRoot = ASSETS_DIR;
 
 // #define GLM_FORCE_INTRINSICS
@@ -19,3 +18,5 @@ const std::string assetRoot = ASSETS_DIR;
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/euler_angles.hpp>
+
+#include <cuda_runtime.h>
