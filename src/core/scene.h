@@ -11,8 +11,6 @@ class Scene
 public:
     Scene() 
     {
-        std::vector<std::shared_ptr<SimplePrimitive>> simplePrimitives;
-
         auto circle = std::make_shared<SimplePrimitive>(
             std::make_shared<Circle>(1.0f),
             std::make_unique<EmissiveMaterial>(glm::vec3{ 10.0f, 5.0f, 5.0f })
@@ -87,73 +85,26 @@ public:
             glm::vec3{ 0.0f, 0.0f, 0.0f },
             glm::vec3{ 0.0f, 0.0f, 0.0f }
         );
-        // simplePrimitives.push_back(circle);
-        m_Primitives.AddItem(circle2);
-        m_Primitives.AddItem(circle3);
-        m_Primitives.AddItem(circle4);
-        m_Primitives.AddItem(circle5);
-        m_Primitives.AddItem(quad);
-        m_Primitives.AddItem(lightQuad);
-        m_Primitives.AddItem(lightQuad2);
 
-        // simplePrimitives.push_back(circle2);
-        // simplePrimitives.push_back(circle3);
-        // simplePrimitives.push_back(circle4);
-        // simplePrimitives.push_back(circle5);
-        // simplePrimitives.push_back(quad);
-        // simplePrimitives.push_back(lightQuad);
-        // simplePrimitives.push_back(lightQuad2);
-        
-        // auto bunny = std::make_shared<Mesh>(
-        //     // "/models/icosahedron.ply"
-        //     // "/models/cube_uv.ply"
-        //     "/models/bunny.ply"
-        //     // "/models/feline.ply"
-        // );
+        // Circles
+        m_Primitives.AddCircle(circle2);
+        m_Primitives.AddCircle(circle3);
+        m_Primitives.AddCircle(circle4);
+        m_Primitives.AddCircle(circle5);
 
-        // auto bunnyMesh = std::make_shared<TriangleList>(
-        //     *bunny,
-        //     // std::make_unique<DielectricMaterial>(0.9f)
-        //     // std::make_unique<EmissiveMaterial>(glm::vec3{ 5.0f, 5.0f, 4.0f })
-        //     std::make_shared<MetalMaterial>(glm::vec3{ 1.0f, 1.0f, 1.0f }, 0.5f)
-        //     // std::make_unique<DielectricMaterial>(0.9f)
-        // );
-        // bunnyMesh->SetTransform(
-        //     glm::vec3{ 1.0f },
-        //     glm::vec3{ -90.0f, 0.0f, 0.0f },
-        //     glm::vec3{ 1.0f, 1.5f, 0.0f }
-        // );
-        
-        // auto feline = std::make_shared<Mesh>(assetRoot + "/models/dragon.ply");
-        // auto felineMesh = std::make_shared<TriangleList>(
-        //     *feline,
-        //     std::make_shared<LambertianMaterial>(glm::vec3{ 1.0f, 1.0f, 1.0f})
-        // );
-        // felineMesh->SetTransform(
-        //     glm::vec3{ 2.0f },
-        //     glm::vec3{ -90.0f, 0.0f, 0.0f },
-        //     glm::vec3{ -1.0f, 1.5f, 0.0f }
-        // );
-        // auto bunnyTriangles = bunnyMesh->GetPrimitives();
-        // auto felineTriangles = felineMesh->GetPrimitives();
-        // simplePrimitives.insert(simplePrimitives.begin(), bunnyTriangles.begin(), bunnyTriangles.end());
-        // simplePrimitives.insert(simplePrimitives.begin(), felineTriangles.begin(), felineTriangles.end());
-        // m_BVH = std::make_shared<BVH>(simplePrimitives);
+        // Quad
+        m_Primitives.AddQuad(quad);
+        m_Primitives.AddQuad(lightQuad);
+        m_Primitives.AddQuad(lightQuad2);
     }
 
     void Intersect(const Ray& ray, SurfaceInteraction* intersect) const
     {
         m_Primitives.Intersect(ray, intersect);
-        // m_BVH->Intersect(ray, intersect);
     }
 
-    // FOr debug purposes
-    // BVH& GetBVH() 
-    // {
-    //     return *m_BVH;
-    // }
+   const auto getCircles() const { return m_Primitives.getCircles(); }
 
 private:
     PrimitiveList m_Primitives;
-    // std::shared_ptr<BVH> m_BVH;
 };

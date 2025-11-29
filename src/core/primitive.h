@@ -52,9 +52,28 @@ public:
         m_List.push_back(shapePrimitive);
     }
 
+    void AddCircle(std::shared_ptr<Primitive> circle) 
+    {
+        m_clist.push_back(circle);
+        AddItem(circle);
+    }
+
+    void AddQuad(std::shared_ptr<Primitive> quad) 
+    {
+        m_qlist.push_back(quad);
+        AddItem(quad);
+    }
+
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
+    
+    const std::vector<std::shared_ptr<Primitive>>& getCircles() const { return m_clist; }
+    const std::vector<std::shared_ptr<Primitive>>& getQuads() const { return m_qlist; }
+
 private:
     std::vector<std::shared_ptr<Primitive>> m_List;
+
+    std::vector<std::shared_ptr<Primitive>> m_clist;
+    std::vector<std::shared_ptr<Primitive>> m_qlist;
 };
 
 class TriangleList : public Primitive

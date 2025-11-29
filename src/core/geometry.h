@@ -7,11 +7,13 @@ struct Ray
     glm::vec3 Origin{ 0.0f };
     glm::vec3 Direction{ 0.0f, 0.0f, 1.0f };
 
+    QUAL_CPU_GPU
     void Normalize()
     {
         Direction = glm::normalize(Direction);
     }
 
+    QUAL_CPU_GPU
     const Ray& ApplyRotate(const glm::vec3& xAxis, const glm::vec3& yAxis, const glm::vec3& zAxis)
     {
         Direction = Direction.x * xAxis + Direction.y * yAxis + Direction.z * zAxis;
@@ -19,6 +21,7 @@ struct Ray
         return *this;
     }
     
+    QUAL_CPU_GPU
     const Ray& ApplyOffset(const glm::vec3& offset)
     {
         Origin += offset;
@@ -26,6 +29,7 @@ struct Ray
         return *this;
     }
     
+    QUAL_CPU_GPU
     Ray Rotate(const glm::vec3& xAxis, const glm::vec3& yAxis, const glm::vec3& zAxis) const
     {
         Ray ray = *this;
@@ -34,6 +38,7 @@ struct Ray
         return ray;
     }
 
+    QUAL_CPU_GPU
     Ray Offset(const glm::vec3& offset) const
     {
         Ray ray = *this;
@@ -41,13 +46,15 @@ struct Ray
 
         return ray;
     }
+
+    // QUAL_CPU_GPU
+    // const Ray& ApplyTransform(const glm::mat4& mat)
+    // {
+    //     Origin = glm::vec3(mat * glm::vec4(Origin, 1.0f));
+    //     Direction = mat * glm::vec4(Direction, 0.0f);
+    // } 
     
-    const Ray& ApplyTransform(const glm::mat4& mat)
-    {
-        Origin = glm::vec3(mat * glm::vec4(Origin, 1.0f));
-        Direction = mat * glm::vec4(Direction, 0.0f);
-    } 
-    
+    QUAL_CPU_GPU
     Ray Transform(const glm::mat4& mat) const
     {
         Ray ray = *this;
@@ -63,21 +70,25 @@ class Transform
 public:
     Transform() = default;
     
+    QUAL_CPU_GPU
     Transform(const glm::mat4& mat)
     {
         m_Mat = mat;
         this->UpdateInv();
     }
 
+    QUAL_CPU_GPU
     Transform(const glm::mat4& mat, const glm::mat4& invMat)
         : m_Mat(mat), m_InvMat(invMat) {}
 
+    QUAL_CPU_GPU
     void SetMat(const glm::mat4& mat)
     {
         m_Mat = mat;
         this->UpdateInv();
     }
 
+    QUAL_CPU_GPU
     void Set(const glm::vec3& scale, const glm::vec3& eulerAngles, const glm::vec3& translation)
     {
         m_Mat = 
@@ -87,16 +98,19 @@ public:
         this->UpdateInv();
     }
     
+    QUAL_CPU_GPU
     Transform GetInverse() const
     {
         return Transform{ m_InvMat, m_Mat };
     }
 
+    QUAL_CPU_GPU
     const glm::mat4& GetMat() const
     {
         return m_Mat;
     }
     
+    QUAL_CPU_GPU
     const glm::mat4& GetInvMat() const
     {
         return m_InvMat;
@@ -104,6 +118,7 @@ public:
     
 private:
     
+    QUAL_CPU_GPU
     void UpdateInv()
     {
         m_InvMat = glm::inverse(m_Mat);
@@ -114,16 +129,19 @@ private:
     glm::mat4 m_InvMat{ 1.0f };
 };
 
+QUAL_CPU_GPU
 inline glm::vec3 TransformVector(const glm::mat4& mat, const glm::vec3 &vec)
 {
     return mat * glm::vec4(vec, 0.0f);
 }
 
+QUAL_CPU_GPU
 inline glm::vec3 TransformNormal(const glm::mat4& invMat, const glm::vec3& normal)
 {
     return glm::normalize(glm::mat3(glm::transpose(invMat)) * normal);
 }
 
+QUAL_CPU_GPU
 inline glm::vec3 TransformPoint(const glm::mat4& mat, const glm::vec3& point)
 {
     return mat * glm::vec4(point, 1.0f);
