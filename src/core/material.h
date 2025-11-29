@@ -48,6 +48,8 @@ public:
         return true;
     }
 
+    glm::vec3 GetAlbedo() const { return m_Albedo; }
+
 private:
 
     glm::vec3 m_Albedo;
@@ -74,6 +76,9 @@ public:
 
         return glm::dot(outRay.Direction, interaction.Normal) > 0.0f;
     }
+
+    glm::vec3 GetAlbedo() const { return m_Albedo; }
+    float GetRoughness() const { return m_Roughness; }
 
 private:
     glm::vec3 m_Albedo;
@@ -106,6 +111,9 @@ public:
 
         return true;
     }
+
+    float GetRefractionIndex() const { return m_RefractionIndex; }
+
 private:
     float m_RefractionIndex;
 
@@ -126,6 +134,9 @@ public:
     {
         emittedColor = m_Color;
     }
+    
+    glm::vec3 GetEmission() const { return m_Color; }
+
 private:
     glm::vec3 m_Color;
 };

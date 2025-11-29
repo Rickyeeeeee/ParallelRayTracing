@@ -1,5 +1,7 @@
 #include "backend/cuda_megakernel/renderer.h"
 #include <vector>
+#include <chrono>
+#include <core/math.h>
 
 /*
 TODO
@@ -15,6 +17,69 @@ TODO
 
 namespace
 {
+QUAL_GPU inline void GPUEmit(GPUMaterial mat, glm::vec3& color) {
+    color = (mat.type == MatType::EMISSIVE) ? mat.color : glm::vec3{ 0.0f };
+}
+QUAL_GPU inline bool GPUScatter(const GPUMaterial mat, const Ray& inRay, const SurfaceInteraction& intersection, glm::vec3& attenuation, Ray& outRay, curandState* rngState) {
+    if (mat.type == MatType::LAMBERTIAN) {
+        glm::vec3 scatterDirection = intersection.Normal + RandomUnitVector(rngState);
+
+        auto& e = scatterDirection;
+        auto s = 1e-8;
+        if ((glm::abs(e[0]) < s) && (glm::abs(e[1]) < s) && (glm::abs(e[2]) < s))
+        {
+            scatterDirection = intersection.Normal;
+        }
+
+        outRay.Origin = intersection.Position;
+        outRay.Direction = glm::normalize(scatterDirection);
+
+        attenuation = mat.color;
+    }
+    else if (mat.type == MatType::METAL) {
+        auto reflectedDir = glm::reflect(inRay.Direction, intersection.Normal);
+        reflectedDir = glm::normalize(reflectedDir) + mat.roughness * RandomUnitVector(rngState);
+        // reflectedDir = glm::normalize(reflectedDir);
+
+        outRay.Origin = intersection.Position;
+        outRay.Direction = glm::normalize(reflectedDir);
+
+        attenuation = mat.color;
+
+        return glm::dot(outRay.Direction, intersection.Normal) > 0.0f;
+    }
+    else if (mat.type == MatType::DIELECTRIC) {
+        auto fresnelReflectance = [](float cosine, float refractionIndex) {
+            // Use Schlick's approximation for reflectance.
+            auto r0 = (1 - refractionIndex) / (1 + refractionIndex);
+            r0 = r0*r0;
+            return r0 + (1-r0)*glm::pow((1 - cosine),5);
+        };
+
+        attenuation = glm::vec3 { 1.0f, 1.0f, 1.0f };
+        float ri = intersection.IsFrontFace ? (1.0f / mat.refractionIndex) : mat.refractionIndex;
+
+        glm::vec3 unit_direction = inRay.Direction;
+        float cos_theta = glm::min(glm::dot(-unit_direction, intersection.Normal), 1.0f);
+        float sin_theta = glm::sqrt(1.0f - cos_theta*cos_theta);
+
+        bool cannot_refract = ri * sin_theta > 1.0f;
+        glm::vec3 direction;
+
+        if (cannot_refract || fresnelReflectance(cos_theta, ri) > Random(rngState))
+            direction = glm::reflect(unit_direction, intersection.Normal);
+        else
+            direction = Reflect(unit_direction, intersection.Normal, ri);
+
+        outRay = Ray{ intersection.Position, direction };
+        return true;
+    }
+    else {
+        return false;
+    }
+    return true;
+}
+
 QUAL_GPU inline void IntersectGPUSphere(const GPUSphere& sphere, const Ray &pray, SurfaceInteraction* intersect) {
     Ray ray;
     ray.Origin = TransformPoint(sphere.transform.GetInvMat(), pray.Origin);
@@ -107,7 +172,97 @@ QUAL_GPU inline void IntersectGPUQuad(const GPUQuad& quad, const Ray &pray, Surf
     intersect->Normal = TransformNormal(quad.transform.GetInvMat(), intersect->Normal);
 }
 
-__global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, GPUQuad* quads)
+QUAL_GPU GPUMaterial IntersectSceneGPU(
+    const Ray& ray,
+    const GPUSphere* spheres, int numSpheres,
+    const GPUQuad*   quads,   int numQuads,
+    SurfaceInteraction* outSi)
+{
+    float minDistance2 = 1e30f;
+    GPUMaterial hit = {MatType::NONE};
+
+    SurfaceInteraction si;
+
+    // --- Spheres ---
+    for (int i = 0; i < numSpheres; ++i) {
+        IntersectGPUSphere(spheres[i], ray, &si);
+        if (si.HasIntersection) {
+            glm::vec3 d = ray.Origin - si.Position;
+            float dist2 = glm::dot(d, d);
+            if (dist2 < minDistance2) {
+                minDistance2 = dist2;
+                *outSi = si;
+                hit = spheres[i].matType;
+            }
+        }
+    }
+
+    // --- Quads ---
+    for (int i = 0; i < numQuads; ++i) {
+        IntersectGPUQuad(quads[i], ray, &si);
+        if (si.HasIntersection) {
+            glm::vec3 d = ray.Origin - si.Position;
+            float dist2 = glm::dot(d, d);
+            if (dist2 < minDistance2) {
+                minDistance2 = dist2;
+                *outSi = si;
+                hit = quads[i].matType;
+            }
+        }
+    }
+
+    if (hit.type == MatType::NONE) {
+        outSi->HasIntersection = false;
+    }
+
+    return hit;
+}
+
+QUAL_GPU glm::vec3 TraceRayGPU(
+    Ray ray,
+    const GPUSphere* spheres, int numSpheres,
+    const GPUQuad*   quads,   int numQuads,
+    const GPUMaterial* materials,
+    glm::vec3 skyLight,
+    curandState* rngState,
+    int maxDepth = 20)
+{
+    glm::vec3 L(0.0f);          // accumulated radiance
+    glm::vec3 throughput(1.0f); // path throughput
+
+    for (int depth = 0; depth < maxDepth; ++depth) {
+        SurfaceInteraction si;
+        GPUMaterial hit = IntersectSceneGPU(ray, spheres, numSpheres, quads, numQuads, &si);
+
+        if (hit.type == MatType::NONE || !si.HasIntersection) {
+            L += throughput * skyLight;
+            break;
+        }
+
+        // Emission
+        glm::vec3 emitted(0.0f);
+        GPUEmit(hit, emitted);
+        L += throughput * emitted;
+
+        // Scatter
+        glm::vec3 attenuation(0.0f);
+        Ray scattered;
+        if (!GPUScatter(hit, ray, si, attenuation, scattered, rngState)) {
+            // Absorbed or no further bounce
+            break;
+        }
+
+        // Update throughput and continue with new ray
+        throughput *= attenuation;
+        ray = scattered;
+        // normalize direction if needed:
+        ray.Direction = glm::normalize(ray.Direction);
+    }
+
+    return L;
+}
+
+__global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, GPUQuad* quads, unsigned long long timeSeed)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
@@ -119,34 +274,32 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, 
 
     Ray ray = cam->GetCameraRay((float)x + 0.5f, (float)y + 0.5f);
     
-    // // Trace Ray
-    // const uint32_t max_depth = 20;
-    // for (uint32_t depth = 0; depth < max_depth; ++depth) {
-    //     glm::vec3 L{ 0.0f };
-    //     SurfaceInteraction intersect;
-    // }
-    float colora = 0.0f;
-    float colorb = 0.0f;
-    for (int i=0; i<4; ++i) {
-        SurfaceInteraction intersect;
-        IntersectGPUSphere(spheres[i], ray, &intersect);
-        if (intersect.HasIntersection) {
-            colora = 255.0f;
-        }
-    }
-    for (int i=0; i<3; i++) {
-        SurfaceInteraction intersect;
-        IntersectGPUQuad(quads[i], ray, &intersect);
-        if (intersect.HasIntersection) {
-            colorb = 255.0f;
-        }
-    }
+    // initialize per-thread RNG state
+    curandState localState;
+    unsigned long long seed = timeSeed ^ (0x9E3779B97F4A7C15ULL + (unsigned long long)idx * 0xBF58476D1CE4E5B9ULL);
+    curand_init(
+        seed,
+        (unsigned long long)idx,
+        0,
+        &localState
+    );
+
+    // Trace Ray
+    glm::vec3 raycolor = TraceRayGPU(
+        ray,
+        spheres, 4,
+        quads, 3,
+        nullptr,
+        glm::vec3(0.4f, 0.3f, 0.6f),
+        &localState
+    );
+
 
     // Method 1: GLM Normalize
     const uint32_t base = idx * 3;
-    colors[base + 0] = colora;
-    colors[base + 1] = colorb;
-    colors[base + 2] = 0.0f;
+    colors[base + 0] = raycolor.r;
+    colors[base + 1] = raycolor.g;
+    colors[base + 2] = raycolor.b;
 }
 
 }
@@ -185,8 +338,11 @@ void CudaMegakernelRenderer::ProgressiveRender()
     // Objects
     GPUSphere* spheres = ConvertCirclesToGPU();
     GPUQuad* quads = ConvertQuadsToGPU();
+    // Random Seed
+    uint64_t seed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
-    GPU_RayTracing<<<blocks, threadsPerBlock>>>(deviceBuffer, d_cam, spheres, quads);
+
+    GPU_RayTracing<<<blocks, threadsPerBlock>>>(deviceBuffer, d_cam, spheres, quads, seed);
     cudaDeviceSynchronize();
     
     
@@ -201,6 +357,38 @@ void CudaMegakernelRenderer::ProgressiveRender()
     cudaFree(spheres);
 }
 
+GPUMaterial createGPUMaterial(const std::shared_ptr<SimplePrimitive> primitive) {
+    MatType type = primitive->GetType();
+    GPUMaterial gmat;
+
+    if (type == MatType::LAMBERTIAN) {
+        auto& mat = dynamic_cast<LambertianMaterial&>(primitive->GetMaterial());
+        gmat.type = MatType::LAMBERTIAN;
+        gmat.color = mat.GetAlbedo();
+    }
+    else if (type == MatType::METAL) {
+        auto& mat = dynamic_cast<MetalMaterial&>(primitive->GetMaterial());
+        gmat.type = MatType::METAL;
+        gmat.color = mat.GetAlbedo();
+        gmat.roughness = mat.GetRoughness();
+    }
+    else if (type == MatType::DIELECTRIC) {
+        auto& mat = dynamic_cast<DielectricMaterial&>(primitive->GetMaterial());
+        gmat.type = MatType::DIELECTRIC;
+        gmat.refractionIndex = mat.GetRefractionIndex();
+    }
+    else if (type == MatType::EMISSIVE) {
+        auto& mat = dynamic_cast<EmissiveMaterial&>(primitive->GetMaterial());
+        gmat.type = MatType::EMISSIVE;
+        gmat.color = mat.GetEmission();
+    }
+    else {
+        gmat.type = MatType::NONE;
+    }
+
+    return gmat;
+}
+
 GPUSphere* CudaMegakernelRenderer::ConvertCirclesToGPU() {
     std::vector<GPUSphere> gs_list;
 
@@ -213,6 +401,7 @@ GPUSphere* CudaMegakernelRenderer::ConvertCirclesToGPU() {
         GPUSphere gs;
         gs.transform = _c->GetTransform();
         gs.radius = c.getRadius();
+        gs.matType = createGPUMaterial(_c);
 
         gs_list.push_back(gs);
     }
@@ -239,6 +428,7 @@ GPUQuad* CudaMegakernelRenderer::ConvertQuadsToGPU() {
         gq.width = q.GetWidth();
         gq.height = q.GetHeight();
         gq.normal = q.GetNormal();
+        gq.matType = createGPUMaterial(_q);
 
         gq_list.push_back(gq);
     }

@@ -5,6 +5,14 @@
 #include <initializer_list>
 #include "core/mesh.h"
 
+enum MatType {
+    NONE = 0,
+    LAMBERTIAN = 1,
+    METAL = 2,
+    DIELECTRIC = 3,
+    EMISSIVE = 4
+};
+
 class Primitive
 {
 public:
@@ -12,22 +20,43 @@ public:
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const = 0;
 };
 
+
 class SimplePrimitive : public Primitive
 {
 public:
-    SimplePrimitive(std::shared_ptr<Shape> shape, std::shared_ptr<Material> material, Transform transform=Transform())
-        : m_Shape(shape), m_Material(material), m_Transform(transform) {}
-    virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
-    Shape& GetShape() { return *m_Shape; }
-    Material& GetMaterial()                     { return *m_Material; }
 
-    Transform GetTransform() const              { return m_Transform; }
-    void SetTransform(const Transform& trans)   { m_Transform = trans; }
-    void SetTransform(
-        const glm::vec3& scale, 
-        const glm::vec3& eulerAngles, 
-        const glm::vec3& translation)   
-    { 
+    SimplePrimitive(std::shared_ptr<Shape> shape,
+                    std::shared_ptr<Material> material,
+                    MatType type = MatType::NONE,
+                    Transform transform = Transform())
+        : m_Shape(std::move(shape))
+        , m_Transform(transform)
+        , m_Material(std::move(material))
+    { m_Type = type; }
+
+    // Overload: allow constructing with a Transform as the third parameter
+    SimplePrimitive(std::shared_ptr<Shape> shape,
+                    std::shared_ptr<Material> material,
+                    Transform transform)
+        : m_Shape(std::move(shape))
+        , m_Transform(transform)
+        , m_Material(std::move(material))
+    { }
+
+    // main virtual
+    void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
+
+    // accessors
+    Shape& GetShape()                     { return *m_Shape; }
+    Material& GetMaterial()               { return *m_Material; }
+
+    Transform GetTransform() const        { return m_Transform; }
+    void SetTransform(const Transform& t) { m_Transform = t; }
+
+    void SetTransform(const glm::vec3& scale,
+                      const glm::vec3& eulerAngles,
+                      const glm::vec3& translation)
+    {
         m_Transform = Transform();
         m_Transform.Set(scale, glm::radians(eulerAngles), translation);
     }
@@ -36,10 +65,14 @@ public:
     {
         return m_Shape->GetAABB(&m_Transform);
     }
+
+    MatType GetType() const                  { return m_Type; }
+
 private:
-    std::shared_ptr<Shape> m_Shape;
-    Transform m_Transform;
+    std::shared_ptr<Shape>    m_Shape;
+    Transform                 m_Transform;
     std::shared_ptr<Material> m_Material;
+    MatType                   m_Type { MatType::NONE };
 };
 
 class PrimitiveList : public Primitive

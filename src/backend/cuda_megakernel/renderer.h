@@ -3,16 +3,25 @@
 #include <core/core.h>
 #include <core/renderer.h>
 
+struct GPUMaterial {
+    MatType type;
+    glm::vec3 color;       // Emissive, Metal, Lambertian
+    float refractionIndex; // Dielectric
+    float roughness;       // Metal
+};
+
 struct GPUSphere {
     Transform transform;
     float radius;
     int material;
+    GPUMaterial matType;
 };
 
 struct GPUQuad {
     Transform transform;
     glm::vec3 normal;
     float width, height;
+    GPUMaterial matType;
 };
 
 // Placeholder CUDA megakernel renderer that just writes test pixels.
