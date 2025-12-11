@@ -11,7 +11,6 @@
 | 5 | Replace CPU ownership with POD pools & remove virtual inheritance | Done |
 | 6 | Build handle-driven SOA packers for wavefront backend | In Progress (next) |
 | 7 | Implement simple wavefront renderer using the new SOA data | Pending |
-| 8 | Cleanup legacy virtual code and validate with renders | Pending |
 
 ---
 
@@ -50,9 +49,9 @@
 ### 6. CUDA Wavefront SOA Pack
 - Files: `src/backend/cuda_wavefront/*`.
 - Actions:
-  1. Reuse the primitive/material pools to fill `MaterialSOA`, `SphereSOA`, `QuadSOA` buffers based on handle tags.
-  2. Ensure each SOA entry captures the correct attributes (albedo, emission, roughness, etc.).
-  3. Upload SOA buffers during `CudaWavefrontRenderer::Init`, eliminating RTTI/dynamic_cast usage.
+  1. Reuse the primitive/material pools to fill `MaterialSOA`, `CircleSOA`, `QuadSOA`, and `PrimitiveSOA` buffers based on handle tags.
+  2. Ensure each SOA entry captures the correct attributes (albedo, emission, roughness, IOR, transforms).
+  3. Upload SOA buffers during `CudaWavefrontRenderer::Init`, eliminating RTTI/dynamic_cast usage and keeping a single host-side packer.
 - Notes:
   - Wavefront can now piggyback on the megakernel uploader to obtain contiguous vectors per material/shape type before transposing into SOA form.
 

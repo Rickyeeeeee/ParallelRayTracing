@@ -1,31 +1,53 @@
 #pragma once
 
 #include <core/core.h>
-#include <core/material.h>
+#include <core/material_handle.h>
+#include <core/geometry.h>
+#include <vector>
 
-struct MaterialSOA 
+struct MaterialSOA
 {
-    glm::vec3* color;
-    MatType* type;
-    float* refractionIndex;
-    float* roughness;
-    int count;
+    glm::vec3* albedo = nullptr;
+    glm::vec3* emission = nullptr;
+    float* roughness = nullptr;
+    float* ior = nullptr;
+    MatType* type = nullptr;
+    int count = 0;
 };
 
-struct SphereSOA 
+struct CircleSOA
 {
-    glm::vec3* center;
-    float* radius;
-    int* materialId;
-    int count;
+    float* radius = nullptr;
+    int count = 0;
 };
 
-struct QuadSOA 
+struct QuadSOA
 {
-    glm::vec3* position;
-    glm::vec3* normal;
-    float* width;
-    float* height;
-    int* materialId;
-    int count;
+    float* width = nullptr;
+    float* height = nullptr;
+    glm::vec3* normal = nullptr;
+    int count = 0;
 };
+
+struct PrimitiveSOA
+{
+    uint8_t* shapeType = nullptr;   // ShapeType as uint8
+    int* shapeIndex = nullptr;      // Index into the corresponding shape SOA
+    int* materialIndex = nullptr;   // Index into MaterialSOA
+    glm::mat4* transform = nullptr;
+    glm::mat4* invTransform = nullptr;
+    int count = 0;
+};
+
+struct WavefrontSceneBuffers
+{
+    MaterialSOA materials{};
+    CircleSOA circles{};
+    QuadSOA quads{};
+    PrimitiveSOA primitives{};
+
+    void Free();
+};
+
+// Build device-ready SOA buffers from the scene primitives and upload them.
+WavefrontSceneBuffers BuildWavefrontSceneBuffers(const std::vector<Primitive>& primitives);
