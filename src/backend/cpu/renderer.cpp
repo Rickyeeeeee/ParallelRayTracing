@@ -67,19 +67,20 @@ glm::vec3 CPURenderer::TraceRay(const Ray& ray, int depth)
         // Emitted Lighting
         glm::vec3 emittedColor{ 0.0f };
         intersect.Material.dispatch([&](const auto* material) {
-            if (!material)
-                return;
-            material->Emit(emittedColor);
+            if (material)
+                material->Emit(emittedColor);
         });
         L += emittedColor;
         glm::vec3 attenuation;
         
         // Scattered Lighting
         Ray scatteredRay;
-        bool scattered = intersect.Material.dispatch([&](const auto* material) {
-            if (!material)
-                return false;
-            return material->Scatter(ray, intersect, attenuation, scatteredRay);
+        bool scattered = false;
+        intersect.Material.dispatch([&](const auto* material) {
+            if (material)
+                scattered = material->Scatter(ray, intersect, attenuation, scatteredRay);
+            else
+                scattered = false;
         });
 
         if (scattered)

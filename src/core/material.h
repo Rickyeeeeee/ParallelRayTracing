@@ -4,6 +4,7 @@
 #include "surface_interaction.h"
 #include "math.h"
 #include <cassert>
+#include <deque>
 
 enum MatType : uint8_t {
     NONE = 0,
@@ -13,201 +14,149 @@ enum MatType : uint8_t {
     EMISSIVE = 4
 };
 
-class Material
+struct LambertianMaterial
 {
-public:
-    Material() = default;
-    virtual ~Material() = default;
+    LambertianMaterial() = default;
+    explicit LambertianMaterial(const glm::vec3& albedo) : m_Albedo(albedo) {}
 
-    virtual bool Scatter(const Ray& inRay, const SurfaceInteraction& intersection, glm::vec3& attenuation, Ray& outRay) const
+    QUAL_CPU_GPU bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay, curandState* rngState = nullptr) const
     {
-        return false;
-    }
-
-    virtual void Emit(glm::vec3& emittedColor) const
-    {
-        emittedColor = glm::vec3(0.0f); // Default to no emission
-    }
-};
-
-// outRay = reflect ray + subsurface scattering ray
-// reflect ray = 0.0f
-// subsurface scattering ray = 1.0f (Randomness because of subsurface scattering)
-class LambertianMaterial : public Material
-{
-public:
-    LambertianMaterial(const glm::vec3& albedo) : m_Albedo(albedo) {};
-
-    virtual bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay) const override
-    {
-        auto scatterDirection = interaction.Normal + RandomUnitVector();
+        auto scatterDirection = interaction.Normal + RandomUnitVector(rngState);
 
         auto& e = scatterDirection;
         auto s = 1e-8;
-        if ((std::fabs(e[0]) < s) && (std::fabs(e[1]) < s) && (std::fabs(e[2]) < s))
+        if ((glm::abs(e[0]) < s) && (glm::abs(e[1]) < s) && (glm::abs(e[2]) < s))
         {
             scatterDirection = interaction.Normal;
         }
 
         outRay.Origin = interaction.Position;
         outRay.Direction = glm::normalize(scatterDirection);
-
         attenuation = m_Albedo;
-
         return true;
+    }
+
+    QUAL_CPU_GPU void Emit(glm::vec3& emittedColor) const
+    {
+        emittedColor = glm::vec3(0.0f);
     }
 
     glm::vec3 GetAlbedo() const { return m_Albedo; }
 
-private:
-
-    glm::vec3 m_Albedo;
+    glm::vec3 m_Albedo{ 0.0f };
 };
 
-// outRay = reflect ray + subsurface scattering ray
-// reflect ray = 1.0f (randomness because of PBR roughness)
-// subsurface scattering ray = 0.0f
-class MetalMaterial : public Material
+struct MetalMaterial
 {
-public:
+    MetalMaterial() = default;
     MetalMaterial(const glm::vec3& albedo, float metallic=0.0f) : m_Albedo(albedo), m_Roughness(metallic) {}
 
-    virtual bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay) const override
+    QUAL_CPU_GPU bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay, curandState* rngState = nullptr) const
     {
         auto reflectedDir = glm::reflect(inRay.Direction, interaction.Normal);
-        reflectedDir = glm::normalize(reflectedDir) + m_Roughness * RandomUnitVector();
-        // reflectedDir = glm::normalize(reflectedDir);
+        reflectedDir = glm::normalize(reflectedDir) + m_Roughness * RandomUnitVector(rngState);
 
         outRay.Origin = interaction.Position;
         outRay.Direction = glm::normalize(reflectedDir);
-
         attenuation = m_Albedo;
-
         return glm::dot(outRay.Direction, interaction.Normal) > 0.0f;
+    }
+
+    QUAL_CPU_GPU void Emit(glm::vec3& emittedColor) const
+    {
+        emittedColor = glm::vec3(0.0f);
     }
 
     glm::vec3 GetAlbedo() const { return m_Albedo; }
     float GetRoughness() const { return m_Roughness; }
 
-private:
-    glm::vec3 m_Albedo;
-    float m_Roughness; // Fresnel reflectance
+    glm::vec3 m_Albedo{ 1.0f };
+    float m_Roughness = 0.0f;
 };
 
-class DielectricMaterial : public Material
+struct DielectricMaterial
 {
-public:
-    DielectricMaterial(float refractionIndex) : m_RefractionIndex(refractionIndex) {};
+    DielectricMaterial() = default;
+    explicit DielectricMaterial(float refractionIndex) : m_RefractionIndex(refractionIndex) {}
 
-    virtual bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay) const override
+    QUAL_CPU_GPU bool Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay, curandState* rngState = nullptr) const
     {
         attenuation = glm::vec3 { 1.0f, 1.0f, 1.0f };
         float ri = interaction.IsFrontFace ? (1.0f / m_RefractionIndex) : m_RefractionIndex;
 
         glm::vec3 unit_direction = inRay.Direction;
-        float cos_theta = std::fmin(glm::dot(-unit_direction, interaction.Normal), 1.0f);
-        float sin_theta = std::sqrt(1.0 - cos_theta*cos_theta);
+        float cos_theta = glm::min(glm::dot(-unit_direction, interaction.Normal), 1.0f);
+        float sin_theta = glm::sqrt(1.0f - cos_theta*cos_theta);
 
-        bool cannot_refract = ri * sin_theta > 1.0;
+        bool cannot_refract = ri * sin_theta > 1.0f;
         glm::vec3 direction;
 
-        if (cannot_refract || this->fresnelReflectance(cos_theta, ri) > Random())
+        if (cannot_refract || fresnelReflectance(cos_theta, ri) > Random(rngState))
             direction = glm::reflect(unit_direction, interaction.Normal);
         else
             direction = Reflect(unit_direction, interaction.Normal, ri);
 
         outRay = Ray{ interaction.Position, direction };
-
         return true;
+    }
+
+    QUAL_CPU_GPU void Emit(glm::vec3& emittedColor) const
+    {
+        emittedColor = glm::vec3(0.0f);
     }
 
     float GetRefractionIndex() const { return m_RefractionIndex; }
 
 private:
-    float m_RefractionIndex;
-
-    static float fresnelReflectance(float cosine, float refractionIndex) {
-        // Use Schlick's approximation for reflectance.
+    QUAL_CPU_GPU static float fresnelReflectance(float cosine, float refractionIndex) {
         auto r0 = (1 - refractionIndex) / (1 + refractionIndex);
         r0 = r0*r0;
-        return r0 + (1-r0)*std::pow((1 - cosine),5);
+        return r0 + (1-r0)*glm::pow((1 - cosine),5);
     }
+
+    float m_RefractionIndex = 1.0f;
 };
 
-class EmissiveMaterial : public Material
+struct EmissiveMaterial
 {
-public:
-    EmissiveMaterial(const glm::vec3& color) : m_Color(color) {}
+    EmissiveMaterial() = default;
+    explicit EmissiveMaterial(const glm::vec3& color) : m_Color(color) {}
 
-    virtual void Emit(glm::vec3& emittedColor) const override
+    QUAL_CPU_GPU bool Scatter(const Ray&, const SurfaceInteraction&, glm::vec3&, Ray&, curandState* = nullptr) const
+    {
+        return false;
+    }
+
+    QUAL_CPU_GPU void Emit(glm::vec3& emittedColor) const
     {
         emittedColor = m_Color;
     }
-    
+
     glm::vec3 GetEmission() const { return m_Color; }
 
-private:
-    glm::vec3 m_Color;
+    glm::vec3 m_Color{ 0.0f };
 };
 
-inline MatType DeduceMaterialType(const Material* material)
-{
-    if (dynamic_cast<const LambertianMaterial*>(material))
-        return MatType::LAMBERTIAN;
-    if (dynamic_cast<const MetalMaterial*>(material))
-        return MatType::METAL;
-    if (dynamic_cast<const DielectricMaterial*>(material))
-        return MatType::DIELECTRIC;
-    if (dynamic_cast<const EmissiveMaterial*>(material))
-        return MatType::EMISSIVE;
-    return MatType::NONE;
-}
-
-inline MaterialHandle MakeMaterialHandle(const Material* material, MatType hint)
+inline MaterialHandle MakeMaterialHandle(MatType type, const void* material)
 {
     MaterialHandle handle;
-    if (!material)
-        return handle;
-
-    MatType type = hint;
-    if (type == MatType::NONE)
-        type = DeduceMaterialType(material);
-
     handle.type = static_cast<uint8_t>(type);
-    switch (type)
-    {
-    case MatType::LAMBERTIAN:
-        handle.ptr = static_cast<const LambertianMaterial*>(material);
-        break;
-    case MatType::METAL:
-        handle.ptr = static_cast<const MetalMaterial*>(material);
-        break;
-    case MatType::DIELECTRIC:
-        handle.ptr = static_cast<const DielectricMaterial*>(material);
-        break;
-    case MatType::EMISSIVE:
-        handle.ptr = static_cast<const EmissiveMaterial*>(material);
-        break;
-    default:
-        handle.Reset();
-        break;
-    }
-
+    handle.ptr = material;
     return handle;
 }
 
 template<typename F>
 QUAL_CPU_GPU decltype(auto) MaterialHandle::dispatch(F&& func) const
 {
-    switch (type)
+    switch (static_cast<MatType>(type))
     {
-    case static_cast<uint8_t>(MatType::LAMBERTIAN):
+    case MatType::LAMBERTIAN:
         return func(static_cast<const LambertianMaterial*>(ptr));
-    case static_cast<uint8_t>(MatType::METAL):
+    case MatType::METAL:
         return func(static_cast<const MetalMaterial*>(ptr));
-    case static_cast<uint8_t>(MatType::DIELECTRIC):
+    case MatType::DIELECTRIC:
         return func(static_cast<const DielectricMaterial*>(ptr));
-    case static_cast<uint8_t>(MatType::EMISSIVE):
+    case MatType::EMISSIVE:
         return func(static_cast<const EmissiveMaterial*>(ptr));
     default:
 #ifndef __CUDA_ARCH__
@@ -216,3 +165,46 @@ QUAL_CPU_GPU decltype(auto) MaterialHandle::dispatch(F&& func) const
         return func(static_cast<const LambertianMaterial*>(nullptr));
     }
 }
+
+struct MaterialPool
+{
+    std::deque<LambertianMaterial> LambertianMaterials;
+    std::deque<MetalMaterial> MetalMaterials;
+    std::deque<DielectricMaterial> DielectricMaterials;
+    std::deque<EmissiveMaterial> EmissiveMaterials;
+
+    MaterialHandle AddLambertian(const glm::vec3& albedo)
+    {
+        LambertianMaterials.emplace_back(albedo);
+        return MakeMaterialHandle(MatType::LAMBERTIAN, &LambertianMaterials.back());
+    }
+
+    MaterialHandle AddMetal(const glm::vec3& albedo, float roughness)
+    {
+        MetalMaterials.emplace_back(albedo, roughness);
+        return MakeMaterialHandle(MatType::METAL, &MetalMaterials.back());
+    }
+
+    MaterialHandle AddDielectric(float ri)
+    {
+        DielectricMaterials.emplace_back(ri);
+        return MakeMaterialHandle(MatType::DIELECTRIC, &DielectricMaterials.back());
+    }
+
+    MaterialHandle AddEmissive(const glm::vec3& emission)
+    {
+        EmissiveMaterials.emplace_back(emission);
+        return MakeMaterialHandle(MatType::EMISSIVE, &EmissiveMaterials.back());
+    }
+
+    template<typename F>
+    void Dispatch(const MaterialHandle& handle, F&& func) const
+    {
+        handle.dispatch(std::forward<F>(func));
+    }
+
+    const std::deque<LambertianMaterial>& GetLambertianMaterials() const { return LambertianMaterials; }
+    const std::deque<MetalMaterial>& GetMetalMaterials() const { return MetalMaterials; }
+    const std::deque<DielectricMaterial>& GetDielectricMaterials() const { return DielectricMaterials; }
+    const std::deque<EmissiveMaterial>& GetEmissiveMaterials() const { return EmissiveMaterials; }
+};

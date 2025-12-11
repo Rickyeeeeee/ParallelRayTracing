@@ -1,199 +1,79 @@
 #include "primitive.h"
+#include <limits>
 
-void SimplePrimitive::Intersect(const Ray& ray, SurfaceInteraction* intersect) const
+void PrimitiveList::AddPrimitive(const PrimitiveHandleView& primitive)
 {
-    Ray rayLocal;
-    rayLocal.Origin = TransformPoint(m_Transform.GetInvMat(), ray.Origin);
-    rayLocal.Direction = TransformNormal(m_Transform.GetMat(), ray.Direction);
-
-    const bool dispatched = m_ShapeHandle.dispatch([&](const auto* shape) {
-        if (!shape)
-            return false;
-        shape->Intersect(rayLocal, intersect);
-        return true;
-    });
-
-    if (!dispatched || !intersect->HasIntersection)
-    {
-        intersect->HasIntersection = false;
-        return;
-    }
-
-    intersect->Position = TransformPoint(m_Transform.GetMat(), intersect->Position);
-    intersect->Normal = TransformNormal(m_Transform.GetInvMat(), intersect->Normal);
-    intersect->Material = m_MaterialHandle;
+    m_Primitives.push_back(primitive);
 }
 
-void SimplePrimitive::RefreshHandles()
+void PrimitiveList::AddCircle(const PrimitiveHandleView& primitive)
 {
-    m_ShapeHandle = MakeShapeHandle(m_Shape.get());
-    MatType matType = m_Type == MatType::NONE ? DeduceMaterialType(m_Material.get()) : m_Type;
-    m_Type = matType;
-    m_MaterialHandle = MakeMaterialHandle(m_Material.get(), matType);
+    AddPrimitive(primitive);
+    m_Circles.push_back(primitive);
 }
 
-PrimitiveHandleView SimplePrimitive::GetHandleView() const
+void PrimitiveList::AddQuad(const PrimitiveHandleView& primitive)
 {
-    PrimitiveHandleView view;
-    view.shape = m_ShapeHandle;
-    view.material = m_MaterialHandle;
-    view.transform = m_Transform;
-    view.type = m_Type;
-    return view;
-}
-
-static bool genNormal = false;
-
-TriangleList::TriangleList(const Mesh& mesh, std::shared_ptr<Material> material)
-    : m_Material(material)
-{
-    m_MaterialHandle = MakeMaterialHandle(m_Material.get());
-    const auto& vertices = mesh.GetVertices();
-    const auto& normals = mesh.GetNormals();
-    const auto& indices = mesh.GetIndices();
-
-    if (indices.size() % 3 != 0)
-        std::cout << "Indice size is not 3 * n" << std::endl;
-    auto count = indices.size() / 3;
-    m_TriangleList.reserve(count);
-
-    for (int i = 0; i < count; i++)
-    {
-        auto i0 = indices[i * 3 + 0];
-        auto i1 = indices[i * 3 + 1];
-        auto i2 = indices[i * 3 + 2];
-        glm::vec3 normal;
-        normal = glm::normalize(glm::cross(vertices[i1]-vertices[i0], vertices[i2]-vertices[i0]));
-        if (genNormal || normals.size() == 0)
-        {
-            m_TriangleList.push_back(Triangle(
-                vertices[i0] * 1.0f,
-                vertices[i1] * 1.0f,
-                vertices[i2] * 1.0f,
-                normal,
-                normal,
-                normal,
-                glm::vec2{ 0.0f },
-                glm::vec2{ 0.0f },
-                glm::vec2{ 0.0f } )
-            );
-        }
-        else
-        {
-            m_TriangleList.push_back(Triangle(
-                vertices[i0] * 1.0f,
-                vertices[i1] * 1.0f,
-                vertices[i2] * 1.0f,
-                normals[i0],
-                normals[i1],
-                normals[i2],
-                glm::vec2{ 0.0f },
-                glm::vec2{ 0.0f },
-                glm::vec2{ 0.0f } )
-            );
-        }
-    }
-}
-
-void TriangleList::Intersect(const Ray& ray, SurfaceInteraction* intersect) const
-{
-    Ray rayLocal;
-    rayLocal.Origin = TransformPoint(m_Transform.GetInvMat(), ray.Origin);
-    rayLocal.Direction = TransformNormal(m_Transform.GetMat(), ray.Direction);
-
-    float minDistance = std::numeric_limits<float>::max();
-    int minIndex = -1;
-    SurfaceInteraction minSurfaceInteraction;
-	for (uint32_t i = 0; i < m_TriangleList.size(); i++)
-	{
-        auto& triangle = m_TriangleList[i];
-		SurfaceInteraction si;
-		triangle.Intersect(rayLocal, &si);
-		if (si.HasIntersection)
-		{
-            si.Position = TransformPoint(m_Transform.GetMat(), si.Position);
-            
-            auto disVec = ray.Origin - si.Position;
-            auto distance2 = glm::dot(disVec, disVec);
-			si.Normal = TransformNormal(m_Transform.GetInvMat(), si.Normal);
-			si.Material = m_MaterialHandle;
-            if (distance2 < minDistance)
-            {
-                minDistance = distance2;
-                minIndex = i;
-                minSurfaceInteraction = si;
-            }
-		}
-	}
-
-    if (minIndex >= 0)
-    {
-        *intersect = minSurfaceInteraction;
-        return;
-    }
-
-    intersect->HasIntersection = false; 
+    AddPrimitive(primitive);
+    m_Quads.push_back(primitive);
 }
 
 void PrimitiveList::Intersect(const Ray& ray, SurfaceInteraction* intersect) const
 {
     float minDistance = std::numeric_limits<float>::max();
-    int minIndex = -1;
-    SurfaceInteraction minSurfaceInteraction;
-    for (int i = 0; i < m_List.size(); i++)
+    SurfaceInteraction bestIntersection;
+
+    for (const auto& primitive : m_Primitives)
     {
-        Primitive* primitive = m_List[i].get();
+        Ray rayLocal;
+        rayLocal.Origin = TransformPoint(primitive.transform.GetInvMat(), ray.Origin);
+        rayLocal.Direction = TransformNormal(primitive.transform.GetMat(), ray.Direction);
+
         SurfaceInteraction si;
-        primitive->Intersect(ray, &si);
+        const bool hit = primitive.shape.dispatch([&](const auto* shape) {
+            if (!shape)
+                return false;
+            shape->Intersect(rayLocal, &si);
+            return si.HasIntersection;
+        });
+
+        if (!hit || !si.HasIntersection)
+            continue;
+
+        si.Position = TransformPoint(primitive.transform.GetMat(), si.Position);
+        si.Normal = TransformNormal(primitive.transform.GetInvMat(), si.Normal);
+        si.Material = primitive.material;
+
         auto disVec = ray.Origin - si.Position;
         auto distance2 = glm::dot(disVec, disVec);
-        if (si.HasIntersection && distance2 < minDistance)
+        if (distance2 < minDistance)
         {
             minDistance = distance2;
-            minIndex = i;
-            minSurfaceInteraction = si;
+            bestIntersection = si;
         }
     }
 
-    if (minIndex >= 0)
+    if (minDistance < std::numeric_limits<float>::max())
     {
-        *intersect = minSurfaceInteraction;
-        return;
+        *intersect = bestIntersection;
     }
-
-    intersect->HasIntersection = false;
+    else
+    {
+        intersect->HasIntersection = false;
+    }
 }
 
 std::vector<PrimitiveHandleView> PrimitiveList::getCircleViews() const
 {
-    std::vector<PrimitiveHandleView> views;
-    views.reserve(m_clist.size());
-    for (const auto& circle : m_clist)
-        views.push_back(circle->GetHandleView());
-    return views;
+    return m_Circles;
 }
 
 std::vector<PrimitiveHandleView> PrimitiveList::getQuadViews() const
 {
-    std::vector<PrimitiveHandleView> views;
-    views.reserve(m_qlist.size());
-    for (const auto& quad : m_qlist)
-        views.push_back(quad->GetHandleView());
-    return views;
+    return m_Quads;
 }
 
-std::vector<std::shared_ptr<SimplePrimitive>> TriangleList::GetPrimitives() const
+const std::vector<PrimitiveHandleView>& PrimitiveList::getPrimitiveViews() const
 {
-    std::vector<std::shared_ptr<SimplePrimitive>> primitives;
-    primitives.reserve(m_TriangleList.size());
-    for (const auto& primitive : m_TriangleList)
-    {
-        primitives.push_back(std::make_shared<SimplePrimitive>(
-            std::make_shared<Triangle>(primitive), 
-            m_Material,
-            m_Transform
-        ));
-    }
-
-    return primitives;
+    return m_Primitives;
 }

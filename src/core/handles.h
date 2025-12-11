@@ -4,10 +4,7 @@
 #include <stdint.h>
 
 enum MatType : uint8_t;
-class Material;
-
 enum class ShapeType : uint8_t;
-class Shape;
 
 struct MaterialHandle
 {
@@ -45,5 +42,5 @@ struct ShapeHandle
     QUAL_CPU_GPU decltype(auto) dispatch(F&& func) const;
 };
 
-MaterialHandle MakeMaterialHandle(const Material* material, MatType hint = (MatType)0);
-ShapeHandle MakeShapeHandle(const Shape* shape);
+MaterialHandle MakeMaterialHandle(MatType type, const void* material);
+ShapeHandle MakeShapeHandle(ShapeType type, const void* shape);
