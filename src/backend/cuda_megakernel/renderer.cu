@@ -26,14 +26,9 @@ QUAL_GPU bool IntersectPrimitive(const Primitive& primitive, const Ray& worldRay
     rayLocal.Direction = TransformNormal(primitive.Transform.GetMat(), worldRay.Direction);
 
     SurfaceInteraction localSi;
-    bool hit = primitive.Shape.dispatch([&](const auto* shape) {
-        if (!shape)
-            return false;
-        shape->Intersect(rayLocal, &localSi);
-        return localSi.HasIntersection;
-    });
+    bool hit = primitive.Shape.Intersect(rayLocal, &localSi);
 
-    if (!hit || !localSi.HasIntersection)
+    if (!hit)
         return false;
 
     localSi.Position = TransformPoint(primitive.Transform.GetMat(), localSi.Position);
@@ -82,32 +77,6 @@ QUAL_GPU bool IntersectSceneGPU(
     return true;
 }
 
-QUAL_GPU void DispatchMaterialEmit(const MaterialHandle& material, glm::vec3& emitted)
-{
-    emitted = glm::vec3(0.0f);
-    material.dispatch([&](const auto* mat) {
-        if (mat)
-            mat->Emit(emitted);
-    });
-}
-
-QUAL_GPU bool DispatchMaterialScatter(
-    const MaterialHandle& material,
-    const Ray& inRay,
-    const SurfaceInteraction& intersection,
-    glm::vec3& attenuation,
-    Ray& outRay,
-    curandState* rngState)
-{
-    bool scattered = false;
-    material.dispatch([&](const auto* mat) {
-        if (!mat)
-            return;
-        scattered = mat->Scatter(inRay, intersection, attenuation, outRay, rngState);
-    });
-    return scattered;
-}
-
 QUAL_GPU glm::vec3 TraceRayGPU(
     Ray ray,
     const Primitive* primitives, int numPrimitives,
@@ -131,12 +100,12 @@ QUAL_GPU glm::vec3 TraceRayGPU(
         }
 
         glm::vec3 emitted(0.0f);
-        DispatchMaterialEmit(material, emitted);
+        material.Emit(emitted);
         L += throughput * emitted;
 
         glm::vec3 attenuation(0.0f);
         Ray scattered;
-        if (!DispatchMaterialScatter(material, ray, si, attenuation, scattered, rngState))
+        if (!material.Scatter(ray, si, attenuation, scattered, rngState))
             break;
 
         throughput *= attenuation;
@@ -307,7 +276,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         return devicePtr;
     };
 
-    const auto& hostPrimitives = m_Scene->getPrimitiveViews();
+    const auto& hostPrimitives = m_Scene->GetPrimitives();
     std::vector<Primitive> devicePrimitives(hostPrimitives.begin(), hostPrimitives.end());
 
     for (auto& primitive : devicePrimitives)

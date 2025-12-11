@@ -5,14 +5,8 @@
 #include "math.h"
 #include <cassert>
 #include <deque>
+#include "material_handle.h"
 
-enum MatType : uint8_t {
-    NONE = 0,
-    LAMBERTIAN = 1,
-    METAL = 2,
-    DIELECTRIC = 3,
-    EMISSIVE = 4
-};
 
 struct LambertianMaterial
 {
@@ -139,31 +133,31 @@ struct EmissiveMaterial
 
 inline MaterialHandle MakeMaterialHandle(MatType type, const void* material)
 {
-    MaterialHandle handle;
-    handle.Type = static_cast<uint8_t>(type);
-    handle.Ptr = material;
-    return handle;
+    return MaterialHandle{ type, material };
 }
 
-template<typename F>
-QUAL_CPU_GPU decltype(auto) MaterialHandle::dispatch(F&& func) const
+QUAL_CPU_GPU inline void MaterialHandle::Emit(glm::vec3& emittedColor) const
 {
-    switch (static_cast<MatType>(Type))
-    {
-    case MatType::LAMBERTIAN:
-        return func(static_cast<const LambertianMaterial*>(Ptr));
-    case MatType::METAL:
-        return func(static_cast<const MetalMaterial*>(Ptr));
-    case MatType::DIELECTRIC:
-        return func(static_cast<const DielectricMaterial*>(Ptr));
-    case MatType::EMISSIVE:
-        return func(static_cast<const EmissiveMaterial*>(Ptr));
-    default:
-#ifndef __CUDA_ARCH__
-        assert(false && "Invalid MaterialHandle dispatch");
-#endif
-        return func(static_cast<const LambertianMaterial*>(nullptr));
-    }
+    emittedColor = glm::vec3(0.0f);
+    if (!IsValid())
+        return;
+    dispatch([&](const auto* material) {
+        if (material)
+            material->Emit(emittedColor);
+    });
+}
+
+QUAL_CPU_GPU inline bool MaterialHandle::Scatter(const Ray& inRay, const SurfaceInteraction& interaction, glm::vec3& attenuation, Ray& outRay, curandState* rngState) const
+{
+    if (!IsValid())
+        return false;
+    bool scattered = false;
+    dispatch([&](const auto* material) {
+        if (!material)
+            return;
+        scattered = material->Scatter(inRay, interaction, attenuation, outRay, rngState);
+    });
+    return scattered;
 }
 
 struct MaterialPool

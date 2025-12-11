@@ -22,7 +22,7 @@ public:
 
     void Intersect(const Ray& ray, SurfaceInteraction* intersect) const;
 
-    const std::vector<Primitive>& getPrimitiveViews() const;
+    const std::vector<Primitive>& GetPrimitives() const;
 
 private:
     std::vector<Primitive> m_Primitives;

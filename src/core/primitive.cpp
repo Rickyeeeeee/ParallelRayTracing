@@ -30,14 +30,9 @@ void PrimitiveList::Intersect(const Ray& ray, SurfaceInteraction* intersect) con
         rayLocal.Direction = TransformNormal(primitive.Transform.GetMat(), ray.Direction);
 
         SurfaceInteraction si;
-        const bool hit = primitive.Shape.dispatch([&](const auto* shape) {
-            if (!shape)
-                return false;
-            shape->Intersect(rayLocal, &si);
-            return si.HasIntersection;
-        });
+        const bool hit = primitive.Shape.Intersect(rayLocal, &si);
 
-        if (!hit || !si.HasIntersection)
+        if (!hit)
             continue;
 
         si.Position = TransformPoint(primitive.Transform.GetMat(), si.Position);
@@ -63,7 +58,7 @@ void PrimitiveList::Intersect(const Ray& ray, SurfaceInteraction* intersect) con
     }
 }
 
-const std::vector<Primitive>& PrimitiveList::getPrimitiveViews() const
+const std::vector<Primitive>& PrimitiveList::GetPrimitives() const
 {
     return m_Primitives;
 }
