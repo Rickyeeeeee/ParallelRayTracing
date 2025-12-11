@@ -5,10 +5,31 @@ void SimplePrimitive::Intersect(const Ray& ray, SurfaceInteraction* intersect) c
     Ray rayLocal;
     rayLocal.Origin = TransformPoint(m_Transform.GetInvMat(), ray.Origin);
     rayLocal.Direction = TransformNormal(m_Transform.GetMat(), ray.Direction);
-    m_Shape->Intersect(rayLocal, intersect);
+
+    const bool dispatched = m_ShapeHandle.dispatch([&](const auto* shape) {
+        if (!shape)
+            return false;
+        shape->Intersect(rayLocal, intersect);
+        return true;
+    });
+
+    if (!dispatched || !intersect->HasIntersection)
+    {
+        intersect->HasIntersection = false;
+        return;
+    }
+
     intersect->Position = TransformPoint(m_Transform.GetMat(), intersect->Position);
     intersect->Normal = TransformNormal(m_Transform.GetInvMat(), intersect->Normal);
-    intersect->Material = m_Material.get();
+    intersect->Material = m_MaterialHandle;
+}
+
+void SimplePrimitive::RefreshHandles()
+{
+    m_ShapeHandle = MakeShapeHandle(m_Shape.get());
+    MatType matType = m_Type == MatType::NONE ? DeduceMaterialType(m_Material.get()) : m_Type;
+    m_Type = matType;
+    m_MaterialHandle = MakeMaterialHandle(m_Material.get(), matType);
 }
 
 static bool genNormal = false;
@@ -16,6 +37,7 @@ static bool genNormal = false;
 TriangleList::TriangleList(const Mesh& mesh, std::shared_ptr<Material> material)
     : m_Material(material)
 {
+    m_MaterialHandle = MakeMaterialHandle(m_Material.get());
     const auto& vertices = mesh.GetVertices();
     const auto& normals = mesh.GetNormals();
     const auto& indices = mesh.GetIndices();
@@ -84,7 +106,7 @@ void TriangleList::Intersect(const Ray& ray, SurfaceInteraction* intersect) cons
             auto disVec = ray.Origin - si.Position;
             auto distance2 = glm::dot(disVec, disVec);
 			si.Normal = TransformNormal(m_Transform.GetInvMat(), si.Normal);
-			si.Material = m_Material.get();
+			si.Material = m_MaterialHandle;
             if (distance2 < minDistance)
             {
                 minDistance = distance2;

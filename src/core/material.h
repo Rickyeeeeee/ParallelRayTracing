@@ -1,8 +1,17 @@
 #pragma once
 
 #include "geometry.h"
-#include "shape.h"
+#include "surface_interaction.h"
 #include "math.h"
+#include <cassert>
+
+enum MatType : uint8_t {
+    NONE = 0,
+    LAMBERTIAN = 1,
+    METAL = 2,
+    DIELECTRIC = 3,
+    EMISSIVE = 4
+};
 
 class Material
 {
@@ -140,3 +149,70 @@ public:
 private:
     glm::vec3 m_Color;
 };
+
+inline MatType DeduceMaterialType(const Material* material)
+{
+    if (dynamic_cast<const LambertianMaterial*>(material))
+        return MatType::LAMBERTIAN;
+    if (dynamic_cast<const MetalMaterial*>(material))
+        return MatType::METAL;
+    if (dynamic_cast<const DielectricMaterial*>(material))
+        return MatType::DIELECTRIC;
+    if (dynamic_cast<const EmissiveMaterial*>(material))
+        return MatType::EMISSIVE;
+    return MatType::NONE;
+}
+
+inline MaterialHandle MakeMaterialHandle(const Material* material, MatType hint)
+{
+    MaterialHandle handle;
+    if (!material)
+        return handle;
+
+    MatType type = hint;
+    if (type == MatType::NONE)
+        type = DeduceMaterialType(material);
+
+    handle.type = static_cast<uint8_t>(type);
+    switch (type)
+    {
+    case MatType::LAMBERTIAN:
+        handle.ptr = static_cast<const LambertianMaterial*>(material);
+        break;
+    case MatType::METAL:
+        handle.ptr = static_cast<const MetalMaterial*>(material);
+        break;
+    case MatType::DIELECTRIC:
+        handle.ptr = static_cast<const DielectricMaterial*>(material);
+        break;
+    case MatType::EMISSIVE:
+        handle.ptr = static_cast<const EmissiveMaterial*>(material);
+        break;
+    default:
+        handle.Reset();
+        break;
+    }
+
+    return handle;
+}
+
+template<typename F>
+QUAL_CPU_GPU decltype(auto) MaterialHandle::dispatch(F&& func) const
+{
+    switch (type)
+    {
+    case static_cast<uint8_t>(MatType::LAMBERTIAN):
+        return func(static_cast<const LambertianMaterial*>(ptr));
+    case static_cast<uint8_t>(MatType::METAL):
+        return func(static_cast<const MetalMaterial*>(ptr));
+    case static_cast<uint8_t>(MatType::DIELECTRIC):
+        return func(static_cast<const DielectricMaterial*>(ptr));
+    case static_cast<uint8_t>(MatType::EMISSIVE):
+        return func(static_cast<const EmissiveMaterial*>(ptr));
+    default:
+#ifndef __CUDA_ARCH__
+        assert(false && "Invalid MaterialHandle dispatch");
+#endif
+        return func(static_cast<const LambertianMaterial*>(nullptr));
+    }
+}

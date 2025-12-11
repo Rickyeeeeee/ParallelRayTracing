@@ -1,18 +1,15 @@
 #pragma once
 
 #include "geometry.h"
+#include "surface_interaction.h"
 #include <memory>
+#include <cassert>
 
-
-class Material;
-
-struct SurfaceInteraction
+enum class ShapeType : uint8_t
 {
-    glm::vec3 Position{ 0.0f };
-    glm::vec3 Normal{ 0.0f, 0.0f, 0.0f };
-    bool HasIntersection = false;
-    bool IsFrontFace = false;
-    Material* Material = nullptr;
+    CIRCLE = 0,
+    QUAD,
+    TRIANGLE
 };
 
 class Shape
@@ -93,3 +90,52 @@ private:
     glm::vec3 m_Normals[3];
     glm::vec2 m_UVs[3];
 };
+
+template<typename F>
+QUAL_CPU_GPU decltype(auto) ShapeHandle::dispatch(F&& func) const
+{
+    switch (type)
+    {
+    case static_cast<uint8_t>(ShapeType::CIRCLE):
+        return func(static_cast<const Circle*>(ptr));
+    case static_cast<uint8_t>(ShapeType::QUAD):
+        return func(static_cast<const Quad*>(ptr));
+    case static_cast<uint8_t>(ShapeType::TRIANGLE):
+        return func(static_cast<const Triangle*>(ptr));
+    default:
+#ifndef __CUDA_ARCH__
+        assert(false && "Invalid ShapeHandle dispatch");
+#endif
+        return func(static_cast<const Circle*>(nullptr));
+    }
+}
+
+inline ShapeHandle MakeShapeHandle(const Shape* shape)
+{
+    ShapeHandle handle;
+    if (!shape)
+        return handle;
+
+    if (auto circle = dynamic_cast<const Circle*>(shape))
+    {
+        handle.type = static_cast<uint8_t>(ShapeType::CIRCLE);
+        handle.ptr = circle;
+        return handle;
+    }
+
+    if (auto quad = dynamic_cast<const Quad*>(shape))
+    {
+        handle.type = static_cast<uint8_t>(ShapeType::QUAD);
+        handle.ptr = quad;
+        return handle;
+    }
+
+    if (auto triangle = dynamic_cast<const Triangle*>(shape))
+    {
+        handle.type = static_cast<uint8_t>(ShapeType::TRIANGLE);
+        handle.ptr = triangle;
+        return handle;
+    }
+
+    return handle;
+}

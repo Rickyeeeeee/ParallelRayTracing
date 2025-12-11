@@ -5,14 +5,6 @@
 #include <initializer_list>
 #include "core/mesh.h"
 
-enum MatType {
-    NONE = 0,
-    LAMBERTIAN = 1,
-    METAL = 2,
-    DIELECTRIC = 3,
-    EMISSIVE = 4
-};
-
 class Primitive
 {
 public:
@@ -32,7 +24,10 @@ public:
         : m_Shape(std::move(shape))
         , m_Transform(transform)
         , m_Material(std::move(material))
-    { m_Type = type; }
+    {
+        m_Type = type;
+        this->RefreshHandles();
+    }
 
     // Overload: allow constructing with a Transform as the third parameter
     SimplePrimitive(std::shared_ptr<Shape> shape,
@@ -41,7 +36,9 @@ public:
         : m_Shape(std::move(shape))
         , m_Transform(transform)
         , m_Material(std::move(material))
-    { }
+    {
+        this->RefreshHandles();
+    }
 
     // main virtual
     void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
@@ -69,10 +66,14 @@ public:
     MatType GetType() const                  { return m_Type; }
 
 private:
+    void RefreshHandles();
+
     std::shared_ptr<Shape>    m_Shape;
     Transform                 m_Transform;
     std::shared_ptr<Material> m_Material;
     MatType                   m_Type { MatType::NONE };
+    ShapeHandle               m_ShapeHandle;
+    MaterialHandle            m_MaterialHandle;
 };
 
 class PrimitiveList : public Primitive
@@ -129,4 +130,5 @@ private:
     std::vector<Triangle>       m_TriangleList;
     std::shared_ptr<Material>   m_Material;
     Transform                   m_Transform;
+    MaterialHandle              m_MaterialHandle;
 };
