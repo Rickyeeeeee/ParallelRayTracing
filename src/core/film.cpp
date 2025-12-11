@@ -1,4 +1,6 @@
 #include "film.h"
+#include <future>
+#include <thread>
 
 Film::Film(uint32_t width, uint32_t height)
 {
@@ -69,35 +71,61 @@ void Film::AddSampleBuffer(const float* rgb, float weight)
 void Film::UpdateDisplay(float exposure, float gamma)
 {
     const uint32_t pixelCount = m_Width * m_Height;
+    if (pixelCount == 0)
+        return;
+
     const float invGamma = 1.0f / gamma;
 
-    for (uint32_t i = 0; i < pixelCount; ++i)
-    {
-        const float w = m_Weights[i];
-        float r = 0.0f, g = 0.0f, b = 0.0f;
+    const uint32_t maxTasks = std::max(1u, std::thread::hardware_concurrency());
+    const uint32_t taskCount = std::min(maxTasks, m_Height == 0 ? 1u : m_Height);
+    const uint32_t rowsPerTask = (m_Height + taskCount - 1) / taskCount;
 
-        if (w > 0.0f)
+    auto worker = [&](uint32_t yBegin, uint32_t yEnd) {
+        for (uint32_t y = yBegin; y < yEnd; ++y)
         {
-            const float invW = 1.0f / w;
-            r = m_Accum[3 * i + 0] * invW;
-            g = m_Accum[3 * i + 1] * invW;
-            b = m_Accum[3 * i + 2] * invW;
+            const uint32_t rowOffset = y * m_Width;
+            for (uint32_t x = 0; x < m_Width; ++x)
+            {
+                const uint32_t i = rowOffset + x;
+                const float w = m_Weights[i];
+                float r = 0.0f, g = 0.0f, b = 0.0f;
 
-            // Tonemap
-            r = Tonemap(r, exposure);
-            g = Tonemap(g, exposure);
-            b = Tonemap(b, exposure);
+                if (w > 0.0f)
+                {
+                    const float invW = 1.0f / w;
+                    r = m_Accum[3 * i + 0] * invW;
+                    g = m_Accum[3 * i + 1] * invW;
+                    b = m_Accum[3 * i + 2] * invW;
 
-            // Gamma
-            r = std::pow(r, invGamma);
-            g = std::pow(g, invGamma);
-            b = std::pow(b, invGamma);
+                    r = Tonemap(r, exposure);
+                    g = Tonemap(g, exposure);
+                    b = Tonemap(b, exposure);
+
+                    r = std::pow(r, invGamma);
+                    g = std::pow(g, invGamma);
+                    b = std::pow(b, invGamma);
+                }
+
+                const uint32_t idxRGBA = 4 * i;
+                m_Display[idxRGBA + 0] = ToByte(r);
+                m_Display[idxRGBA + 1] = ToByte(g);
+                m_Display[idxRGBA + 2] = ToByte(b);
+                m_Display[idxRGBA + 3] = 255;
+            }
         }
+    };
 
-        const uint32_t idxRGBA = 4 * i;
-        m_Display[idxRGBA + 0] = ToByte(r);
-        m_Display[idxRGBA + 1] = ToByte(g);
-        m_Display[idxRGBA + 2] = ToByte(b);
-        m_Display[idxRGBA + 3] = 255;
+    std::vector<std::future<void>> futures;
+    futures.reserve(taskCount);
+    for (uint32_t task = 0; task < taskCount; ++task)
+    {
+        const uint32_t yBegin = task * rowsPerTask;
+        if (yBegin >= m_Height)
+            break;
+        const uint32_t yEnd = std::min(m_Height, yBegin + rowsPerTask);
+        futures.push_back(std::async(std::launch::async, worker, yBegin, yEnd));
     }
+
+    for (auto& f : futures)
+        f.get();
 }
