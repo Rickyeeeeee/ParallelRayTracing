@@ -3,6 +3,7 @@
 #include <core/core.h>
 #include <core/material_handle.h>
 #include <core/geometry.h>
+#include <core/primitive.h>
 #include <vector>
 
 struct MaterialSOA

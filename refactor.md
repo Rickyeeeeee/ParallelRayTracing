@@ -54,11 +54,16 @@
   3. Upload SOA buffers during `CudaWavefrontRenderer::Init`, eliminating RTTI/dynamic_cast usage and keeping a single host-side packer.
 - Notes:
   - Wavefront can now piggyback on the megakernel uploader to obtain contiguous vectors per material/shape type before transposing into SOA form.
+  - Planned kernels for wavefront (minimal set):
+    - `GenerateCameraRays` → fill ray/state queues for the first bounce.
+    - `IntersectPrimitives` → traverse `PrimitiveSOA` by shape type, write hit info + material index.
+    - `ShadeScatter` → read hits, fetch material data from `MaterialSOA`, spawn next-bounce rays and accumulate emission/throughput.
+    - `AccumulateFrame` → write accumulated radiance to the film buffer.
 
 ### 7. Simple Wavefront Renderer
 - Files: `src/backend/cuda_wavefront/renderer.{h,cu}`.
 - Actions:
-  - Implement a minimal wavefront renderer that consumes the new SOA data end-to-end, validating the shared packing pipeline and setting the stage for future optimizations.
+  - Implement the kernels above end-to-end (single-bounce is acceptable as a first pass), validating the shared packing pipeline and setting the stage for future optimizations.
 
 ### 8. Cleanup & Validation
 - Files: `src/core/material.h`, `src/core/shape.h`, `src/core/primitive.*`, renderers.

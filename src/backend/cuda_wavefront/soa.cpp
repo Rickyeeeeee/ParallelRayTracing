@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <unordered_map>
 #include <vector>
+#include <type_traits>
 
 namespace
 {
