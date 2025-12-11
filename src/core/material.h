@@ -140,24 +140,24 @@ struct EmissiveMaterial
 inline MaterialHandle MakeMaterialHandle(MatType type, const void* material)
 {
     MaterialHandle handle;
-    handle.type = static_cast<uint8_t>(type);
-    handle.ptr = material;
+    handle.Type = static_cast<uint8_t>(type);
+    handle.Ptr = material;
     return handle;
 }
 
 template<typename F>
 QUAL_CPU_GPU decltype(auto) MaterialHandle::dispatch(F&& func) const
 {
-    switch (static_cast<MatType>(type))
+    switch (static_cast<MatType>(Type))
     {
     case MatType::LAMBERTIAN:
-        return func(static_cast<const LambertianMaterial*>(ptr));
+        return func(static_cast<const LambertianMaterial*>(Ptr));
     case MatType::METAL:
-        return func(static_cast<const MetalMaterial*>(ptr));
+        return func(static_cast<const MetalMaterial*>(Ptr));
     case MatType::DIELECTRIC:
-        return func(static_cast<const DielectricMaterial*>(ptr));
+        return func(static_cast<const DielectricMaterial*>(Ptr));
     case MatType::EMISSIVE:
-        return func(static_cast<const EmissiveMaterial*>(ptr));
+        return func(static_cast<const EmissiveMaterial*>(Ptr));
     default:
 #ifndef __CUDA_ARCH__
         assert(false && "Invalid MaterialHandle dispatch");
@@ -203,8 +203,4 @@ struct MaterialPool
         handle.dispatch(std::forward<F>(func));
     }
 
-    const std::deque<LambertianMaterial>& GetLambertianMaterials() const { return LambertianMaterials; }
-    const std::deque<MetalMaterial>& GetMetalMaterials() const { return MetalMaterials; }
-    const std::deque<DielectricMaterial>& GetDielectricMaterials() const { return DielectricMaterials; }
-    const std::deque<EmissiveMaterial>& GetEmissiveMaterials() const { return EmissiveMaterials; }
 };

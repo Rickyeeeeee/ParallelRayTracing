@@ -9,10 +9,10 @@ Scene::Scene()
     };
 
     auto addPrimitive = [&](const ShapeHandle& shape, const MaterialHandle& material, const Transform& transform, MatType type, ShapeType shapeType) {
-        PrimitiveHandleView primitive;
-        primitive.shape = shape;
-        primitive.material = material;
-        primitive.transform = transform;
+        Primitive primitive;
+        primitive.Shape = shape;
+        primitive.Material = material;
+        primitive.Transform = transform;
         if (shapeType == ShapeType::CIRCLE)
             m_Primitives.AddCircle(primitive);
         else if (shapeType == ShapeType::QUAD)

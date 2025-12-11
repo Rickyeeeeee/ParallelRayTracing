@@ -10,14 +10,14 @@ struct MaterialHandle
 {
     static constexpr uint8_t kInvalid = 0xFF;
 
-    uint8_t type = kInvalid;
-    const void* ptr = nullptr;
+    uint8_t Type = kInvalid;
+    const void* Ptr = nullptr;
 
-    QUAL_CPU_GPU bool IsValid() const { return type != kInvalid && ptr != nullptr; }
+    QUAL_CPU_GPU bool IsValid() const { return Type != kInvalid && Ptr != nullptr; }
     QUAL_CPU_GPU void Reset()
     {
-        type = kInvalid;
-        ptr = nullptr;
+        Type = kInvalid;
+        Ptr = nullptr;
     }
 
     template<typename F>
@@ -28,14 +28,14 @@ struct ShapeHandle
 {
     static constexpr uint8_t kInvalid = 0xFF;
 
-    uint8_t type = kInvalid;
-    const void* ptr = nullptr;
+    uint8_t Type = kInvalid;
+    const void* Ptr = nullptr;
 
-    QUAL_CPU_GPU bool IsValid() const { return type != kInvalid && ptr != nullptr; }
+    QUAL_CPU_GPU bool IsValid() const { return Type != kInvalid && Ptr != nullptr; }
     QUAL_CPU_GPU void Reset()
     {
-        type = kInvalid;
-        ptr = nullptr;
+        Type = kInvalid;
+        Ptr = nullptr;
     }
 
     template<typename F>

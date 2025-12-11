@@ -83,14 +83,14 @@ private:
 template<typename F>
 QUAL_CPU_GPU decltype(auto) ShapeHandle::dispatch(F&& func) const
 {
-    switch (static_cast<ShapeType>(type))
+    switch (static_cast<ShapeType>(Type))
     {
     case ShapeType::CIRCLE:
-        return func(static_cast<const Circle*>(ptr));
+        return func(static_cast<const Circle*>(Ptr));
     case ShapeType::QUAD:
-        return func(static_cast<const Quad*>(ptr));
+        return func(static_cast<const Quad*>(Ptr));
     case ShapeType::TRIANGLE:
-        return func(static_cast<const Triangle*>(ptr));
+        return func(static_cast<const Triangle*>(Ptr));
     default:
 #ifndef __CUDA_ARCH__
         assert(false && "Invalid ShapeHandle dispatch");
@@ -102,8 +102,8 @@ QUAL_CPU_GPU decltype(auto) ShapeHandle::dispatch(F&& func) const
 inline ShapeHandle MakeShapeHandle(ShapeType type, const void* shape)
 {
     ShapeHandle handle;
-    handle.type = static_cast<uint8_t>(type);
-    handle.ptr = shape;
+    handle.Type = static_cast<uint8_t>(type);
+    handle.Ptr = shape;
     return handle;
 }
 

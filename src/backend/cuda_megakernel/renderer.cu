@@ -19,14 +19,14 @@ TODO
 
 namespace
 {
-QUAL_GPU bool IntersectPrimitive(const PrimitiveHandleView& primitive, const Ray& worldRay, SurfaceInteraction* outSi)
+QUAL_GPU bool IntersectPrimitive(const Primitive& primitive, const Ray& worldRay, SurfaceInteraction* outSi)
 {
     Ray rayLocal;
-    rayLocal.Origin = TransformPoint(primitive.transform.GetInvMat(), worldRay.Origin);
-    rayLocal.Direction = TransformNormal(primitive.transform.GetMat(), worldRay.Direction);
+    rayLocal.Origin = TransformPoint(primitive.Transform.GetInvMat(), worldRay.Origin);
+    rayLocal.Direction = TransformNormal(primitive.Transform.GetMat(), worldRay.Direction);
 
     SurfaceInteraction localSi;
-    bool hit = primitive.shape.dispatch([&](const auto* shape) {
+    bool hit = primitive.Shape.dispatch([&](const auto* shape) {
         if (!shape)
             return false;
         shape->Intersect(rayLocal, &localSi);
@@ -36,16 +36,16 @@ QUAL_GPU bool IntersectPrimitive(const PrimitiveHandleView& primitive, const Ray
     if (!hit || !localSi.HasIntersection)
         return false;
 
-    localSi.Position = TransformPoint(primitive.transform.GetMat(), localSi.Position);
-    localSi.Normal = TransformNormal(primitive.transform.GetInvMat(), localSi.Normal);
-    localSi.Material = primitive.material;
+    localSi.Position = TransformPoint(primitive.Transform.GetMat(), localSi.Position);
+    localSi.Normal = TransformNormal(primitive.Transform.GetInvMat(), localSi.Normal);
+    localSi.Material = primitive.Material;
     *outSi = localSi;
     return true;
 }
 
 QUAL_GPU bool IntersectSceneGPU(
     const Ray& ray,
-    const PrimitiveHandleView* primitives, int numPrimitives,
+    const Primitive* primitives, int numPrimitives,
     SurfaceInteraction* outSi,
     MaterialHandle* outMaterial)
 {
@@ -66,7 +66,7 @@ QUAL_GPU bool IntersectSceneGPU(
         {
             minDistance2 = dist2;
             bestIntersection = si;
-            bestMaterial = primitives[i].material;
+            bestMaterial = primitives[i].Material;
             hitAny = true;
         }
     }
@@ -110,7 +110,7 @@ QUAL_GPU bool DispatchMaterialScatter(
 
 QUAL_GPU glm::vec3 TraceRayGPU(
     Ray ray,
-    const PrimitiveHandleView* primitives, int numPrimitives,
+    const Primitive* primitives, int numPrimitives,
     glm::vec3 skyLight,
     curandState* rngState,
     int maxDepth = 20)
@@ -147,7 +147,7 @@ QUAL_GPU glm::vec3 TraceRayGPU(
     return L;
 }
 
-__global__ void GPU_RayTracing(float* colors, Camera * cam, PrimitiveHandleView* primitives, int primitiveCount, unsigned long long timeSeed)
+__global__ void GPU_RayTracing(float* colors, Camera * cam, Primitive* primitives, int primitiveCount, unsigned long long timeSeed)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
@@ -259,7 +259,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!handle.IsValid())
             return nullptr;
 
-        auto it = materialRemap.find(handle.ptr);
+        auto it = materialRemap.find(handle.Ptr);
         if (it != materialRemap.end())
             return it->second;
 
@@ -276,7 +276,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!devicePtr)
             return nullptr;
 
-        materialRemap[handle.ptr] = devicePtr;
+        materialRemap[handle.Ptr] = devicePtr;
         data.materialAllocs.push_back(devicePtr);
         return devicePtr;
     };
@@ -285,7 +285,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!handle.IsValid())
             return nullptr;
 
-        auto it = shapeRemap.find(handle.ptr);
+        auto it = shapeRemap.find(handle.Ptr);
         if (it != shapeRemap.end())
             return it->second;
 
@@ -302,24 +302,24 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!devicePtr)
             return nullptr;
 
-        shapeRemap[handle.ptr] = devicePtr;
+        shapeRemap[handle.Ptr] = devicePtr;
         data.shapeAllocs.push_back(devicePtr);
         return devicePtr;
     };
 
     const auto& hostPrimitives = m_Scene->getPrimitiveViews();
-    std::vector<PrimitiveHandleView> devicePrimitives(hostPrimitives.begin(), hostPrimitives.end());
+    std::vector<Primitive> devicePrimitives(hostPrimitives.begin(), hostPrimitives.end());
 
     for (auto& primitive : devicePrimitives)
     {
-        primitive.material.ptr = uploadMaterial(primitive.material);
-        primitive.shape.ptr = uploadShape(primitive.shape);
+        primitive.Material.Ptr = uploadMaterial(primitive.Material);
+        primitive.Shape.Ptr = uploadShape(primitive.Shape);
     }
 
     data.primitiveCount = static_cast<int>(devicePrimitives.size());
     if (data.primitiveCount > 0)
     {
-        const size_t primitivesSize = sizeof(PrimitiveHandleView) * data.primitiveCount;
+        const size_t primitivesSize = sizeof(Primitive) * data.primitiveCount;
         cudaMalloc(reinterpret_cast<void**>(&data.primitives), primitivesSize);
         cudaMemcpy(data.primitives, devicePrimitives.data(), primitivesSize, cudaMemcpyHostToDevice);
     }

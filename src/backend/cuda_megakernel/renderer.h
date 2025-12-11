@@ -20,7 +20,7 @@ public:
 private:
     struct DeviceSceneData
     {
-        PrimitiveHandleView* primitives = nullptr;
+        Primitive* primitives = nullptr;
         int primitiveCount = 0;
 
         std::vector<void*> materialAllocs;
