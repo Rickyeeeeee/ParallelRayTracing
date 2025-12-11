@@ -32,6 +32,16 @@ void SimplePrimitive::RefreshHandles()
     m_MaterialHandle = MakeMaterialHandle(m_Material.get(), matType);
 }
 
+PrimitiveHandleView SimplePrimitive::GetHandleView() const
+{
+    PrimitiveHandleView view;
+    view.shape = m_ShapeHandle;
+    view.material = m_MaterialHandle;
+    view.transform = m_Transform;
+    view.type = m_Type;
+    return view;
+}
+
 static bool genNormal = false;
 
 TriangleList::TriangleList(const Mesh& mesh, std::shared_ptr<Material> material)
@@ -152,6 +162,24 @@ void PrimitiveList::Intersect(const Ray& ray, SurfaceInteraction* intersect) con
     }
 
     intersect->HasIntersection = false;
+}
+
+std::vector<PrimitiveHandleView> PrimitiveList::getCircleViews() const
+{
+    std::vector<PrimitiveHandleView> views;
+    views.reserve(m_clist.size());
+    for (const auto& circle : m_clist)
+        views.push_back(circle->GetHandleView());
+    return views;
+}
+
+std::vector<PrimitiveHandleView> PrimitiveList::getQuadViews() const
+{
+    std::vector<PrimitiveHandleView> views;
+    views.reserve(m_qlist.size());
+    for (const auto& quad : m_qlist)
+        views.push_back(quad->GetHandleView());
+    return views;
 }
 
 std::vector<std::shared_ptr<SimplePrimitive>> TriangleList::GetPrimitives() const

@@ -118,8 +118,10 @@ public:
         m_Primitives.Intersect(ray, intersect);
     }
 
-   const auto getCircles() const { return m_Primitives.getCircles(); }
-   const auto getQuads() const { return m_Primitives.getQuads(); }
+   const std::vector<std::shared_ptr<SimplePrimitive>>& getCircles() const { return m_Primitives.getCircles(); }
+   const std::vector<std::shared_ptr<SimplePrimitive>>& getQuads() const { return m_Primitives.getQuads(); }
+   std::vector<PrimitiveHandleView> getCircleViews() const { return m_Primitives.getCircleViews(); }
+   std::vector<PrimitiveHandleView> getQuadViews() const { return m_Primitives.getQuadViews(); }
 
 private:
     PrimitiveList m_Primitives;

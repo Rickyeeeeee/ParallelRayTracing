@@ -3,25 +3,27 @@
 #include <core/core.h>
 #include <core/renderer.h>
 
+#include <vector>
+
 struct GPUMaterial {
-    MatType type;
-    glm::vec3 color;       // Emissive, Metal, Lambertian
-    float refractionIndex; // Dielectric
-    float roughness;       // Metal
+    MatType type = MatType::NONE;
+    glm::vec3 color{ 0.0f };  // Emissive, Metal, Lambertian
+    float refractionIndex = 1.0f; // Dielectric
+    float roughness = 0.0f;       // Metal
 };
 
-struct GPUSphere {
+struct GPUPrimitive {
+    ShapeType shapeType = ShapeType::CIRCLE;
     Transform transform;
-    float radius;
-    int material;
-    GPUMaterial matType;
+    GPUMaterial material;
+    float param0 = 0.0f;      // radius (circle) or width (quad)
+    float param1 = 0.0f;      // height (quad)
+    glm::vec3 normal{ 0.0f, 1.0f, 0.0f }; // quad normal
 };
 
-struct GPUQuad {
-    Transform transform;
-    glm::vec3 normal;
-    float width, height;
-    GPUMaterial matType;
+struct GPUPrimitiveBuffer {
+    GPUPrimitive* devicePtr = nullptr;
+    int count = 0;
 };
 
 // Placeholder CUDA megakernel renderer that just writes test pixels.
@@ -34,8 +36,9 @@ public:
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
     void ProgressiveRender() override;
 
-    GPUSphere* ConvertCirclesToGPU();
-    GPUQuad* ConvertQuadsToGPU();
+    GPUPrimitiveBuffer UploadPrimitives() const;
+    GPUPrimitive ConvertPrimitive(const PrimitiveHandleView& view) const;
+    GPUMaterial ConvertMaterial(const MaterialHandle& handle) const;
 
 private:
     Film* m_Film = nullptr;

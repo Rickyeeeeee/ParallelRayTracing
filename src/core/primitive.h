@@ -5,6 +5,14 @@
 #include <initializer_list>
 #include "core/mesh.h"
 
+struct PrimitiveHandleView
+{
+    ShapeHandle shape;
+    MaterialHandle material;
+    Transform transform;
+    MatType type { MatType::NONE };
+};
+
 class Primitive
 {
 public:
@@ -64,6 +72,7 @@ public:
     }
 
     MatType GetType() const                  { return m_Type; }
+    PrimitiveHandleView GetHandleView() const;
 
 private:
     void RefreshHandles();
@@ -86,13 +95,13 @@ public:
         m_List.push_back(shapePrimitive);
     }
 
-    void AddCircle(std::shared_ptr<Primitive> circle) 
+    void AddCircle(const std::shared_ptr<SimplePrimitive>& circle) 
     {
         m_clist.push_back(circle);
         AddItem(circle);
     }
 
-    void AddQuad(std::shared_ptr<Primitive> quad) 
+    void AddQuad(const std::shared_ptr<SimplePrimitive>& quad) 
     {
         m_qlist.push_back(quad);
         AddItem(quad);
@@ -100,14 +109,16 @@ public:
 
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
     
-    const std::vector<std::shared_ptr<Primitive>>& getCircles() const { return m_clist; }
-    const std::vector<std::shared_ptr<Primitive>>& getQuads() const { return m_qlist; }
+    const std::vector<std::shared_ptr<SimplePrimitive>>& getCircles() const { return m_clist; }
+    const std::vector<std::shared_ptr<SimplePrimitive>>& getQuads() const { return m_qlist; }
+    std::vector<PrimitiveHandleView> getCircleViews() const;
+    std::vector<PrimitiveHandleView> getQuadViews() const;
 
 private:
     std::vector<std::shared_ptr<Primitive>> m_List;
 
-    std::vector<std::shared_ptr<Primitive>> m_clist;
-    std::vector<std::shared_ptr<Primitive>> m_qlist;
+    std::vector<std::shared_ptr<SimplePrimitive>> m_clist;
+    std::vector<std::shared_ptr<SimplePrimitive>> m_qlist;
 };
 
 class TriangleList : public Primitive

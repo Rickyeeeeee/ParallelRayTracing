@@ -1,6 +1,7 @@
 #include "backend/cuda_megakernel/renderer.h"
 #include <vector>
 #include <chrono>
+#include <type_traits>
 #include <core/math.h>
 
 /*
@@ -80,15 +81,16 @@ QUAL_GPU inline bool GPUScatter(const GPUMaterial mat, const Ray& inRay, const S
     return true;
 }
 
-QUAL_GPU inline void IntersectGPUSphere(const GPUSphere& sphere, const Ray &pray, SurfaceInteraction* intersect) {
+QUAL_GPU inline void IntersectGPUCircle(const GPUPrimitive& primitive, const Ray &pray, SurfaceInteraction* intersect) {
     Ray ray;
-    ray.Origin = TransformPoint(sphere.transform.GetInvMat(), pray.Origin);
-    ray.Direction = TransformNormal(sphere.transform.GetMat(), pray.Direction);
+    ray.Origin = TransformPoint(primitive.transform.GetInvMat(), pray.Origin);
+    ray.Direction = TransformNormal(primitive.transform.GetMat(), pray.Direction);
     
     auto l = ray.Origin;
     float a = glm::dot(ray.Direction, ray.Direction);
     float b = 2.0f * glm::dot(l, ray.Direction);
-    float c = glm::dot(l,l) - sphere.radius * sphere.radius;
+    float radius = primitive.param0;
+    float c = glm::dot(l,l) - radius * radius;
 
     constexpr static float tMin = 0.001f;
 
@@ -132,14 +134,14 @@ QUAL_GPU inline void IntersectGPUSphere(const GPUSphere& sphere, const Ray &pray
         intersect->HasIntersection = false;
     }
 
-    intersect->Position = TransformPoint(sphere.transform.GetMat(), intersect->Position);
-    intersect->Normal = TransformNormal(sphere.transform.GetInvMat(), intersect->Normal);
+    intersect->Position = TransformPoint(primitive.transform.GetMat(), intersect->Position);
+    intersect->Normal = TransformNormal(primitive.transform.GetInvMat(), intersect->Normal);
 }
 
-QUAL_GPU inline void IntersectGPUQuad(const GPUQuad& quad, const Ray &pray, SurfaceInteraction* intersect) {
+QUAL_GPU inline void IntersectGPUQuad(const GPUPrimitive& primitive, const Ray &pray, SurfaceInteraction* intersect) {
     Ray ray;
-    ray.Origin = TransformPoint(quad.transform.GetInvMat(), pray.Origin);
-    ray.Direction = TransformNormal(quad.transform.GetMat(), pray.Direction);
+    ray.Origin = TransformPoint(primitive.transform.GetInvMat(), pray.Origin);
+    ray.Direction = TransformNormal(primitive.transform.GetMat(), pray.Direction);
 
     if (fabs(ray.Direction.y) < 1e-8f)
     {
@@ -151,8 +153,8 @@ QUAL_GPU inline void IntersectGPUQuad(const GPUQuad& quad, const Ray &pray, Surf
 
     auto p = ray.Origin + ray.Direction * t;
 
-    float halfWidth = quad.width / 2.0f;
-    float halfHeight = quad.height / 2.0f;
+    float halfWidth = primitive.param0 / 2.0f;
+    float halfHeight = primitive.param1 / 2.0f;
 
     constexpr static float tMin = 0.001f;
 
@@ -161,21 +163,21 @@ QUAL_GPU inline void IntersectGPUQuad(const GPUQuad& quad, const Ray &pray, Surf
         intersect->HasIntersection = true;
         intersect->Position = p;
         intersect->IsFrontFace = ray.Origin.y > 0.0f;
-        intersect->Normal = intersect->IsFrontFace ? quad.normal : -quad.normal;
+        glm::vec3 normal = primitive.normal;
+        intersect->Normal = intersect->IsFrontFace ? normal : -normal;
     }
     else
     {
         intersect->HasIntersection = false;
     }
     
-    intersect->Position = TransformPoint(quad.transform.GetMat(), intersect->Position);
-    intersect->Normal = TransformNormal(quad.transform.GetInvMat(), intersect->Normal);
+    intersect->Position = TransformPoint(primitive.transform.GetMat(), intersect->Position);
+    intersect->Normal = TransformNormal(primitive.transform.GetInvMat(), intersect->Normal);
 }
 
 QUAL_GPU GPUMaterial IntersectSceneGPU(
     const Ray& ray,
-    const GPUSphere* spheres, int numSpheres,
-    const GPUQuad*   quads,   int numQuads,
+    const GPUPrimitive* primitives, int numPrimitives,
     SurfaceInteraction* outSi)
 {
     float minDistance2 = 1e30f;
@@ -183,30 +185,28 @@ QUAL_GPU GPUMaterial IntersectSceneGPU(
 
     SurfaceInteraction si;
 
-    // --- Spheres ---
-    for (int i = 0; i < numSpheres; ++i) {
-        IntersectGPUSphere(spheres[i], ray, &si);
-        if (si.HasIntersection) {
-            glm::vec3 d = ray.Origin - si.Position;
-            float dist2 = glm::dot(d, d);
-            if (dist2 < minDistance2) {
-                minDistance2 = dist2;
-                *outSi = si;
-                hit = spheres[i].matType;
-            }
+    for (int i = 0; i < numPrimitives; ++i) {
+        const GPUPrimitive& primitive = primitives[i];
+        switch (primitive.shapeType)
+        {
+        case ShapeType::CIRCLE:
+            IntersectGPUCircle(primitive, ray, &si);
+            break;
+        case ShapeType::QUAD:
+            IntersectGPUQuad(primitive, ray, &si);
+            break;
+        default:
+            si.HasIntersection = false;
+            break;
         }
-    }
 
-    // --- Quads ---
-    for (int i = 0; i < numQuads; ++i) {
-        IntersectGPUQuad(quads[i], ray, &si);
         if (si.HasIntersection) {
             glm::vec3 d = ray.Origin - si.Position;
             float dist2 = glm::dot(d, d);
             if (dist2 < minDistance2) {
                 minDistance2 = dist2;
                 *outSi = si;
-                hit = quads[i].matType;
+                hit = primitive.material;
             }
         }
     }
@@ -220,9 +220,7 @@ QUAL_GPU GPUMaterial IntersectSceneGPU(
 
 QUAL_GPU glm::vec3 TraceRayGPU(
     Ray ray,
-    const GPUSphere* spheres, int numSpheres,
-    const GPUQuad*   quads,   int numQuads,
-    const GPUMaterial* materials,
+    const GPUPrimitive* primitives, int numPrimitives,
     glm::vec3 skyLight,
     curandState* rngState,
     int maxDepth = 20)
@@ -232,7 +230,7 @@ QUAL_GPU glm::vec3 TraceRayGPU(
 
     for (int depth = 0; depth < maxDepth; ++depth) {
         SurfaceInteraction si;
-        GPUMaterial hit = IntersectSceneGPU(ray, spheres, numSpheres, quads, numQuads, &si);
+        GPUMaterial hit = IntersectSceneGPU(ray, primitives, numPrimitives, &si);
 
         if (hit.type == MatType::NONE || !si.HasIntersection) {
             L += throughput * skyLight;
@@ -262,7 +260,7 @@ QUAL_GPU glm::vec3 TraceRayGPU(
     return L;
 }
 
-__global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, GPUQuad* quads, unsigned long long timeSeed)
+__global__ void GPU_RayTracing(float* colors, Camera * cam, GPUPrimitive* primitives, int primitiveCount, unsigned long long timeSeed)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
@@ -285,14 +283,13 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, GPUSphere* spheres, 
     );
 
     // Trace Ray
-    glm::vec3 raycolor = TraceRayGPU(
-        ray,
-        spheres, 4,
-        quads, 3,
-        nullptr,
-        glm::vec3(0.4f, 0.3f, 0.6f),
-        &localState
-    );
+    glm::vec3 raycolor = (primitiveCount > 0)
+        ? TraceRayGPU(
+            ray,
+            primitives, primitiveCount,
+            glm::vec3(0.4f, 0.3f, 0.6f),
+            &localState)
+        : glm::vec3(0.4f, 0.3f, 0.6f);
 
 
     // Method 1: GLM Normalize
@@ -336,13 +333,17 @@ void CudaMegakernelRenderer::ProgressiveRender()
     cudaMalloc(&d_cam, sizeof(Camera));
     cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
     // Objects
-    GPUSphere* spheres = ConvertCirclesToGPU();
-    GPUQuad* quads = ConvertQuadsToGPU();
+    GPUPrimitiveBuffer primitiveBuffer = UploadPrimitives();
     // Random Seed
     uint64_t seed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
 
-    GPU_RayTracing<<<blocks, threadsPerBlock>>>(deviceBuffer, d_cam, spheres, quads, seed);
+    GPU_RayTracing<<<blocks, threadsPerBlock>>>(
+        deviceBuffer,
+        d_cam,
+        primitiveBuffer.devicePtr,
+        primitiveBuffer.count,
+        seed);
     cudaDeviceSynchronize();
     
     
@@ -354,89 +355,98 @@ void CudaMegakernelRenderer::ProgressiveRender()
 
     cudaFree(deviceBuffer);
     cudaFree(d_cam);
-    cudaFree(spheres);
+    if (primitiveBuffer.devicePtr)
+        cudaFree(primitiveBuffer.devicePtr);
 }
 
-GPUMaterial createGPUMaterial(const std::shared_ptr<SimplePrimitive> primitive) {
-    MatType type = primitive->GetType();
-    GPUMaterial gmat;
+GPUPrimitiveBuffer CudaMegakernelRenderer::UploadPrimitives() const
+{
+    GPUPrimitiveBuffer buffer{};
+    if (!m_Scene)
+        return buffer;
 
-    if (type == MatType::LAMBERTIAN) {
-        auto& mat = dynamic_cast<LambertianMaterial&>(primitive->GetMaterial());
-        gmat.type = MatType::LAMBERTIAN;
-        gmat.color = mat.GetAlbedo();
-    }
-    else if (type == MatType::METAL) {
-        auto& mat = dynamic_cast<MetalMaterial&>(primitive->GetMaterial());
-        gmat.type = MatType::METAL;
-        gmat.color = mat.GetAlbedo();
-        gmat.roughness = mat.GetRoughness();
-    }
-    else if (type == MatType::DIELECTRIC) {
-        auto& mat = dynamic_cast<DielectricMaterial&>(primitive->GetMaterial());
-        gmat.type = MatType::DIELECTRIC;
-        gmat.refractionIndex = mat.GetRefractionIndex();
-    }
-    else if (type == MatType::EMISSIVE) {
-        auto& mat = dynamic_cast<EmissiveMaterial&>(primitive->GetMaterial());
-        gmat.type = MatType::EMISSIVE;
-        gmat.color = mat.GetEmission();
-    }
-    else {
-        gmat.type = MatType::NONE;
-    }
+    auto circleViews = m_Scene->getCircleViews();
+    auto quadViews = m_Scene->getQuadViews();
 
-    return gmat;
+    std::vector<GPUPrimitive> gpuPrimitives;
+    gpuPrimitives.reserve(circleViews.size() + quadViews.size());
+
+    auto appendPrimitive = [&](const PrimitiveHandleView& view) {
+        gpuPrimitives.push_back(ConvertPrimitive(view));
+    };
+
+    for (const auto& view : circleViews)
+        appendPrimitive(view);
+    for (const auto& view : quadViews)
+        appendPrimitive(view);
+
+    if (gpuPrimitives.empty())
+        return buffer;
+
+    buffer.count = static_cast<int>(gpuPrimitives.size());
+    const size_t size = sizeof(GPUPrimitive) * gpuPrimitives.size();
+    cudaMalloc(&buffer.devicePtr, size);
+    cudaMemcpy(buffer.devicePtr, gpuPrimitives.data(), size, cudaMemcpyHostToDevice);
+
+    return buffer;
 }
 
-GPUSphere* CudaMegakernelRenderer::ConvertCirclesToGPU() {
-    std::vector<GPUSphere> gs_list;
-
-    const auto clist = m_Scene->getCircles();
-    for (auto circle: clist) {
-        auto _c = std::static_pointer_cast<SimplePrimitive>(circle);
-        Shape& _s = _c->GetShape();
-        Circle& c = dynamic_cast<Circle&>(_s);
-
-        GPUSphere gs;
-        gs.transform = _c->GetTransform();
-        gs.radius = c.getRadius();
-        gs.matType = createGPUMaterial(_c);
-
-        gs_list.push_back(gs);
-    }
-
-    GPUSphere* gs_ptr;
-    size_t size = sizeof(GPUSphere) * gs_list.size();
-    cudaMalloc(&gs_ptr, size);
-    cudaMemcpy(gs_ptr, gs_list.data(), size, cudaMemcpyHostToDevice);
-
-    return gs_ptr;
+GPUMaterial CudaMegakernelRenderer::ConvertMaterial(const MaterialHandle& handle) const
+{
+    GPUMaterial gpuMat;
+    handle.dispatch([&](const auto* material) {
+        if (!material)
+            return;
+        using MatT = std::remove_cv_t<std::remove_reference_t<decltype(*material)>>;
+        if constexpr (std::is_same_v<MatT, LambertianMaterial>)
+        {
+            gpuMat.type = MatType::LAMBERTIAN;
+            gpuMat.color = material->GetAlbedo();
+        }
+        else if constexpr (std::is_same_v<MatT, MetalMaterial>)
+        {
+            gpuMat.type = MatType::METAL;
+            gpuMat.color = material->GetAlbedo();
+            gpuMat.roughness = material->GetRoughness();
+        }
+        else if constexpr (std::is_same_v<MatT, DielectricMaterial>)
+        {
+            gpuMat.type = MatType::DIELECTRIC;
+            gpuMat.refractionIndex = material->GetRefractionIndex();
+        }
+        else if constexpr (std::is_same_v<MatT, EmissiveMaterial>)
+        {
+            gpuMat.type = MatType::EMISSIVE;
+            gpuMat.color = material->GetEmission();
+        }
+    });
+    return gpuMat;
 }
 
-GPUQuad* CudaMegakernelRenderer::ConvertQuadsToGPU() {
-    std::vector<GPUQuad> gq_list;
+GPUPrimitive CudaMegakernelRenderer::ConvertPrimitive(const PrimitiveHandleView& view) const
+{
+    GPUPrimitive primitive;
+    primitive.transform = view.transform;
+    primitive.material = ConvertMaterial(view.material);
+    primitive.shapeType = static_cast<ShapeType>(view.shape.type);
 
-    const auto qlist = m_Scene->getQuads();
-    for (auto quad: qlist) {
-        auto _q = std::static_pointer_cast<SimplePrimitive>(quad);
-        Shape& _s = _q->GetShape();
-        Quad& q = dynamic_cast<Quad&>(_s);
+    view.shape.dispatch([&](const auto* shape) {
+        if (!shape)
+            return;
+        using ShapeT = std::remove_cv_t<std::remove_reference_t<decltype(*shape)>>;
+        if constexpr (std::is_same_v<ShapeT, Circle>)
+        {
+            primitive.shapeType = ShapeType::CIRCLE;
+            primitive.param0 = shape->getRadius();
+        }
+        else if constexpr (std::is_same_v<ShapeT, Quad>)
+        {
+            primitive.shapeType = ShapeType::QUAD;
+            primitive.param0 = shape->GetWidth();
+            primitive.param1 = shape->GetHeight();
+            primitive.normal = shape->GetNormal();
+        }
+    });
 
-        GPUQuad gq;
-        gq.transform = _q->GetTransform();
-        gq.width = q.GetWidth();
-        gq.height = q.GetHeight();
-        gq.normal = q.GetNormal();
-        gq.matType = createGPUMaterial(_q);
-
-        gq_list.push_back(gq);
-    }
-
-    GPUQuad* gq_ptr;
-    size_t size = sizeof(GPUQuad) * gq_list.size();
-    cudaMalloc(&gq_ptr, size);
-    cudaMemcpy(gq_ptr, gq_list.data(), size, cudaMemcpyHostToDevice);
-
-    return gq_ptr;
+    return primitive;
 }
