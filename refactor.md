@@ -10,7 +10,7 @@
 | 4 | Integrate handles into CUDA megakernel (host/device data upload) | Done |
 | 5 | Replace CPU ownership with POD pools & remove virtual inheritance | Done |
 | 6 | Build handle-driven SOA packers for wavefront backend | Done |
-| 7 | Implement simple wavefront renderer using the new SOA data | In Progress |
+| 7 | Cleanup & Validation | Pending |
 
 ---
 
@@ -77,12 +77,7 @@
   5. `AccumulateFrame` drains `AccumulatorQueue`, writes radiance to the film accumulation buffer, and optionally resets completed PixelStates for the next frame.
 - **Lifetime**: Device primitives only change when `Init` runs; `PixelState`/queues persist across progressive frames so RNG seeds and accumulated radiance remain stable.
 
-### 7. Simple Wavefront Renderer
-- Files: `src/backend/cuda_wavefront/renderer.{h,cu}`.
-- Actions:
-  - Implement the kernels above end-to-end (single-bounce is acceptable as a first pass), validating the shared packing pipeline and setting the stage for future optimizations.
-
-### 8. Cleanup & Validation
+### 7. Cleanup & Validation
 - Files: `src/core/material.h`, `src/core/shape.h`, `src/core/primitive.*`, renderers.
 - Actions:
   - Delete obsolete virtual base classes and any `MatType` plumbing that the new handles supersede.

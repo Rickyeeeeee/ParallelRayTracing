@@ -63,7 +63,26 @@ QUAL_GPU inline uint32_t RayQueueSOA::AllocateSlot() const
 {
     if (!IsValid())
         return 0xFFFFFFFFu;
-    return atomicAdd(Count, 1u);
+
+// #if defined(__CUDA_ARCH__)
+    // Warp-aggregated allocation: 1 atomicAdd per warp.
+    const unsigned int mask = __activemask();
+    const int lane = static_cast<int>(threadIdx.x) & 31;
+    const int leader = __ffs(mask) - 1;
+    const uint32_t warpCount = static_cast<uint32_t>(__popc(mask));
+
+    uint32_t warpBase = 0;
+    if (lane == leader)
+        warpBase = atomicAdd(Count, warpCount);
+
+    warpBase = __shfl_sync(mask, warpBase, leader);
+
+    const unsigned int laneMask = (lane == 0) ? 0u : ((1u << lane) - 1u);
+    const uint32_t laneRank = static_cast<uint32_t>(__popc(mask & laneMask));
+    return warpBase + laneRank;
+// #else
+//     return atomicAdd(Count, 1u);
+// #endif
 }
 
 QUAL_GPU inline void RayQueueSOA::Push(uint32_t pixelIndex) const
