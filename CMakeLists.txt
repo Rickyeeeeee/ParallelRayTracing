@@ -93,6 +93,7 @@ if (MSVC)
         $<$<COMPILE_LANGUAGE:CUDA>:
             --expt-relaxed-constexpr
             --extended-lambda
+            -lineinfo
         >
         $<$<COMPILE_LANGUAGE:CXX>:
             /EHsc

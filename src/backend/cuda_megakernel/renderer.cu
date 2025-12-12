@@ -116,7 +116,18 @@ QUAL_GPU glm::vec3 TraceRayGPU(
     return L;
 }
 
-__global__ void GPU_RayTracing(float* colors, Camera * cam, Primitive* primitives, int primitiveCount, unsigned long long timeSeed)
+__global__ void InitRNGKernel(
+    curandState* rngStates,
+    uint32_t pixelCount,
+    uint64_t seed)
+{
+    uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= pixelCount) return;
+
+    curand_init(seed, idx, 0, &rngStates[idx]);
+}
+
+__global__ void GPU_RayTracing(float* colors, Camera* cam, Primitive* primitives, int primitiveCount, curandState* rngStates)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
@@ -128,15 +139,15 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, Primitive* primitive
 
     Ray ray = cam->GetCameraRay((float)x + 0.5f, (float)y + 0.5f);
     
-    // initialize per-thread RNG state
     curandState localState;
-    unsigned long long seed = timeSeed ^ (0x9E3779B97F4A7C15ULL + (unsigned long long)idx * 0xBF58476D1CE4E5B9ULL);
-    curand_init(
-        seed,
-        (unsigned long long)idx,
-        0,
-        &localState
-    );
+    if (rngStates)
+    {
+        localState = rngStates[idx];
+    }
+    else
+    {
+        curand_init(0xC0FFEEULL, (unsigned long long)idx, 0, &localState);
+    }
 
     // Trace Ray
     glm::vec3 raycolor = (primitiveCount > 0)
@@ -147,6 +158,10 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, Primitive* primitive
             &localState)
         : glm::vec3(0.4f, 0.3f, 0.6f);
 
+    if (rngStates)
+    {
+        rngStates[idx] = localState;
+    }
 
     // Method 1: GLM Normalize
     const uint32_t base = idx * 3;
@@ -158,11 +173,29 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, Primitive* primitive
 }
 
 
+CudaMegakernelRenderer::~CudaMegakernelRenderer()
+{
+    if (m_RNGStates)
+    {
+        cudaFree(m_RNGStates);
+        m_RNGStates = nullptr;
+    }
+    m_RNGCapacity = 0;
+}
+
 void CudaMegakernelRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
 {
     m_Film = &film;
     m_Scene = &scene;
     m_Camera = &camera;
+
+    if (m_RNGStates)
+    {
+        cudaFree(m_RNGStates);
+        m_RNGStates = nullptr;
+    }
+    m_RNGCapacity = 0;
+    m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 }
 
 void CudaMegakernelRenderer::ProgressiveRender()
@@ -191,8 +224,25 @@ void CudaMegakernelRenderer::ProgressiveRender()
     cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
     // Scene data
     DeviceSceneData deviceScene = UploadSceneData();
-    // Random Seed
-    uint64_t seed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+
+    if (m_RNGSeed == 0)
+    {
+        m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    }
+
+    if (pixelCount > m_RNGCapacity)
+    {
+        if (m_RNGStates)
+        {
+            cudaFree(m_RNGStates);
+            m_RNGStates = nullptr;
+        }
+
+        cudaMalloc(&m_RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
+        m_RNGCapacity = pixelCount;
+
+        InitRNGKernel<<<blocks, threadsPerBlock>>>(reinterpret_cast<curandState*>(m_RNGStates), pixelCount, m_RNGSeed);
+    }
 
 
     GPU_RayTracing<<<blocks, threadsPerBlock>>>(
@@ -200,7 +250,7 @@ void CudaMegakernelRenderer::ProgressiveRender()
         d_cam,
         deviceScene.primitives,
         deviceScene.primitiveCount,
-        seed);
+        reinterpret_cast<curandState*>(m_RNGStates));
     cudaDeviceSynchronize();
     
     

@@ -83,12 +83,13 @@ public:
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
     void ProgressiveRender() override;
 
-private:
+ private:
     Film* m_Film = nullptr;
     const Scene* m_Scene = nullptr;
     const Camera* m_Camera = nullptr;
 
     uint32_t m_FrameIndex = 0;
+    uint64_t m_RNGSeed = 0;
     WavefrontSceneBuffers m_SceneBuffers{};
 
     PixelStateSOA m_PixelState{};

@@ -80,8 +80,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    uint32_t windowWidth = 800;
-    uint32_t windowHeight = 600;
+    uint32_t windowWidth = 1200;
+    uint32_t windowHeight = 900;
     GLFWwindow* window =
         glfwCreateWindow(windowWidth, windowHeight, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
 
@@ -92,7 +92,7 @@ int main() {
     }
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    glfwSwapInterval(0);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "[Error] Failed to initialize GLAD\n";

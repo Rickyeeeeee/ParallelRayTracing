@@ -12,7 +12,7 @@ class CudaMegakernelRenderer : public Renderer
 {
 public:
     CudaMegakernelRenderer() = default;
-    ~CudaMegakernelRenderer() override = default;
+    ~CudaMegakernelRenderer() override;
 
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
     void ProgressiveRender() override;
@@ -30,8 +30,12 @@ private:
     DeviceSceneData UploadSceneData() const;
     void FreeDeviceScene(DeviceSceneData& data) const;
 
-private:
+ private:
     Film* m_Film = nullptr;
     const Scene* m_Scene = nullptr;
     const Camera* m_Camera = nullptr;
+
+    void* m_RNGStates = nullptr;
+    uint32_t m_RNGCapacity = 0;
+    uint64_t m_RNGSeed = 0;
 };

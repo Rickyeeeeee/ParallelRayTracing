@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <vector>
+#include <chrono>
 #include <cfloat>
 #include <core/camera.h>
 #include <core/shape.h>
@@ -112,7 +113,7 @@ QUAL_GPU bool IntersectPrimitiveDevice(const Primitive& primitive, const Ray& wo
     return true;
 }
 
-QUAL_GPU inline void ResetPixelState(PixelStateSOA state, uint32_t pixelIndex, uint32_t frameIndex)
+QUAL_GPU inline void ResetPixelState(PixelStateSOA state, uint32_t pixelIndex)
 {
     state.PixelIndices[pixelIndex] = pixelIndex;
     state.PathDepth[pixelIndex] = 0;
@@ -125,19 +126,30 @@ QUAL_GPU inline void ResetPixelState(PixelStateSOA state, uint32_t pixelIndex, u
     state.Alive[pixelIndex] = 1;
     state.HitDistance[pixelIndex] = 0.0f;
     state.HasHit[pixelIndex] = 0;
-    const uint32_t seed = frameIndex * 9781u + pixelIndex * 6271u + 17u;
-    state.RNGSeed[pixelIndex] = seed;
-    curand_init(seed, pixelIndex, 0, &state.RNGStates[pixelIndex]);
 }
 
-__global__ void GenerateCameraRaysKernel(PixelStateSOA pixelStates, WavefrontQueues queues, const Camera* cam, uint32_t width, uint32_t height, uint32_t frameIndex)
+__global__ void InitRNGStatesKernel(PixelStateSOA pixelStates, uint32_t pixelCount, uint64_t seed)
+{
+    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= pixelCount)
+        return;
+
+    if (!pixelStates.RNGStates)
+        return;
+
+    curand_init(seed, idx, 0, &pixelStates.RNGStates[idx]);
+    if (pixelStates.RNGSeed)
+        pixelStates.RNGSeed[idx] = static_cast<uint32_t>(seed ^ (0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(idx) * 0xBF58476D1CE4E5B9ULL));
+}
+
+__global__ void GenerateCameraRaysKernel(PixelStateSOA pixelStates, WavefrontQueues queues, const Camera* cam, uint32_t width, uint32_t height)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = width * height;
     if (idx >= pixelCount)
         return;
 
-    ResetPixelState(pixelStates, idx, frameIndex);
+    ResetPixelState(pixelStates, idx);
 
     const uint32_t x = idx % width;
     const uint32_t y = idx / width;
@@ -299,6 +311,7 @@ void CudaWavefrontRenderer::Init(Film& film, const Scene& scene, const Camera& c
     m_Scene = &scene;
     m_Camera = &camera;
     m_FrameIndex = 0;
+    m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
     // Rebuild the device-side SOA buffers whenever the renderer is re-initialized.
     m_SceneBuffers.Free();
@@ -321,6 +334,9 @@ void CudaWavefrontRenderer::ProgressiveRender()
         return;
 
     const size_t bufferSize = static_cast<size_t>(pixelCount) * 3 * sizeof(float);
+    
+    float* deviceBuffer = nullptr;
+    cudaMalloc(&deviceBuffer, bufferSize);
 
     EnsureDeviceState(pixelCount);
     if (!m_PixelState.RayOrigins || !m_PixelState.RayDirections || !m_PixelState.Materials || !m_DeviceCamera
@@ -332,13 +348,11 @@ void CudaWavefrontRenderer::ProgressiveRender()
     m_Queues.ResetCounts();
     cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
 
-    float* deviceBuffer = nullptr;
-    cudaMalloc(&deviceBuffer, bufferSize);
 
     const uint32_t threadsPerBlock = 256;
     const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
     WavefrontQueues queueView = m_Queues;
-    GenerateCameraRaysKernel<<<blocks, threadsPerBlock>>>(m_PixelState, queueView, m_DeviceCamera, width, height, m_FrameIndex);
+    GenerateCameraRaysKernel<<<blocks, threadsPerBlock>>>(m_PixelState, queueView, m_DeviceCamera, width, height);
 
     const uint32_t activeRayCount = pixelCount;
     if (activeRayCount > 0)
@@ -353,9 +367,9 @@ void CudaWavefrontRenderer::ProgressiveRender()
     ShadeMissKernel<<<shadeBlocks, threadsPerBlock>>>(m_PixelState, queueView, skyColor);
 
     BlitRadianceKernel<<<blocks, threadsPerBlock>>>(m_PixelState, deviceBuffer, pixelCount);
+    std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
     cudaDeviceSynchronize();
 
-    std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
     cudaMemcpy(hostBuffer.data(), deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
 
     m_Film->AddSampleBuffer(hostBuffer.data());
@@ -400,6 +414,14 @@ void CudaWavefrontRenderer::EnsureDeviceState(uint32_t pixelCount)
         reallocArray(m_PixelState.Alive, sizeof(uint8_t));
         reallocArray(m_PixelState.HasHit, sizeof(uint8_t));
         m_PixelState.Capacity = pixelCount;
+
+        if (m_RNGSeed == 0)
+        {
+            m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        }
+        const uint32_t threadsPerBlock = 256;
+        const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
+        InitRNGStatesKernel<<<blocks, threadsPerBlock>>>(m_PixelState, pixelCount, m_RNGSeed);
     }
 
     auto ensureQueueCapacity = [&](RayQueueSOA& queue) {
