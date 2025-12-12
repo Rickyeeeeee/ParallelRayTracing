@@ -21,6 +21,7 @@ struct PixelState
     MaterialHandle Material{};
     uint8_t Alive = 1;
     uint8_t HasHit = 0;
+    uint8_t IsFrontFace = 1;
 };
 
 struct PixelStateSOA
@@ -40,6 +41,7 @@ struct PixelStateSOA
     MaterialHandle* Materials = nullptr;
     uint8_t* Alive = nullptr;
     uint8_t* HasHit = nullptr;
+    uint8_t* IsFrontFace = nullptr;
     uint32_t Capacity = 0;
 
     QUAL_GPU inline PixelState Load(uint32_t index) const;

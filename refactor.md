@@ -9,8 +9,8 @@
 | 3 | Refactor `Scene`/`PrimitiveList` to expose handle-based primitive views (ownership unchanged) | Done |
 | 4 | Integrate handles into CUDA megakernel (host/device data upload) | Done |
 | 5 | Replace CPU ownership with POD pools & remove virtual inheritance | Done |
-| 6 | Build handle-driven SOA packers for wavefront backend | In Progress (next) |
-| 7 | Implement simple wavefront renderer using the new SOA data | Pending |
+| 6 | Build handle-driven SOA packers for wavefront backend | Done |
+| 7 | Implement simple wavefront renderer using the new SOA data | In Progress |
 
 ---
 
