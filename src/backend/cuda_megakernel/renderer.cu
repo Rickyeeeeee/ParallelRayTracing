@@ -100,12 +100,12 @@ QUAL_GPU glm::vec3 TraceRayGPU(
         }
 
         glm::vec3 emitted(0.0f);
-        material.Emit(emitted);
+        si.Material.Emit(emitted);
         L += throughput * emitted;
 
         glm::vec3 attenuation(0.0f);
         Ray scattered;
-        if (!material.Scatter(ray, si, attenuation, scattered, rngState))
+        if (!si.Material.Scatter(ray, si, attenuation, scattered, rngState))
             break;
 
         throughput *= attenuation;
