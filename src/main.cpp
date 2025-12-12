@@ -28,6 +28,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <chrono>
 
 bool checkCUDA() {
     int deviceCount = 0;
@@ -79,8 +80,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    uint32_t windowWidth = 800;
-    uint32_t windowHeight = 600;
+    uint32_t windowWidth = 1200;
+    uint32_t windowHeight = 900;
     GLFWwindow* window =
         glfwCreateWindow(windowWidth, windowHeight, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
 
@@ -91,7 +92,7 @@ int main() {
     }
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    glfwSwapInterval(0);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "[Error] Failed to initialize GLAD\n";
@@ -155,6 +156,9 @@ int main() {
     int selectedRenderer = 0;
 
     std::shared_ptr<OpenGLTexture> frame = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
+    double lastRenderMs = 0.0;
+    double lastFilmUpdateMs = 0.0;
+    double lastUploadMs = 0.0;
     
 
     // --------------------------
@@ -177,6 +181,7 @@ int main() {
         ImGui::Text("FPS: %.3f", 1.0 / delta);
 
         ImGui::Text("OpenGL: %s", (const char*)glGetString(GL_VERSION));
+        ImGui::Text("Timings (ms): render %.3f | film %.3f | upload/draw %.3f", lastRenderMs, lastFilmUpdateMs, lastUploadMs);
 
         ImGui::Separator();
         ImGui::Text("CUDA Status:");
@@ -218,14 +223,24 @@ int main() {
         }
 
         if (activeRenderer)
+        {
+            const auto t0 = std::chrono::high_resolution_clock::now();
             activeRenderer->ProgressiveRender();
-        film.UpdateDisplay();
-        frame->SetData(film.GetDisplayData());
-        openglRenderer.Draw(*frame);
+            const auto t1 = std::chrono::high_resolution_clock::now();
+            film.UpdateDisplay();
+            const auto t2 = std::chrono::high_resolution_clock::now();
+            frame->SetData(film.GetDisplayData());
+            openglRenderer.Draw(*frame);
+            const auto t3 = std::chrono::high_resolution_clock::now();
+
+            lastRenderMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            lastFilmUpdateMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
+            lastUploadMs = std::chrono::duration<double, std::milli>(t3 - t2).count();
+        }
         
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapInterval(1);
+        glfwSwapInterval(0);
         glfwSwapBuffers(window);
 
         lastTime = currentTime;

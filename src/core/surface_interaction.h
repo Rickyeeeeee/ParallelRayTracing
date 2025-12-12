@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/geometry.h"
-#include "core/handles.h"
+#include "core/material_handle.h"
 
 struct SurfaceInteraction
 {

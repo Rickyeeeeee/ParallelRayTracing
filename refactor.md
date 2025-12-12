@@ -9,9 +9,8 @@
 | 3 | Refactor `Scene`/`PrimitiveList` to expose handle-based primitive views (ownership unchanged) | Done |
 | 4 | Integrate handles into CUDA megakernel (host/device data upload) | Done |
 | 5 | Replace CPU ownership with POD pools & remove virtual inheritance | Done |
-| 6 | Build handle-driven SOA packers for wavefront backend | In Progress (next) |
-| 7 | Implement simple wavefront renderer using the new SOA data | Pending |
-| 8 | Cleanup legacy virtual code and validate with renders | Pending |
+| 6 | Build handle-driven SOA packers for wavefront backend | Done |
+| 7 | Implement simple wavefront renderer using the new SOA data | In Progress |
 
 ---
 
@@ -50,16 +49,38 @@
 ### 6. CUDA Wavefront SOA Pack
 - Files: `src/backend/cuda_wavefront/*`.
 - Actions:
-  1. Reuse the primitive/material pools to fill `MaterialSOA`, `SphereSOA`, `QuadSOA` buffers based on handle tags.
-  2. Ensure each SOA entry captures the correct attributes (albedo, emission, roughness, etc.).
-  3. Upload SOA buffers during `CudaWavefrontRenderer::Init`, eliminating RTTI/dynamic_cast usage.
+  1. Mirror the scene primitives to device memory (remapping every material/shape handle like the megakernel uploader) so kernels can call the shared `ShapeHandle::Intersect` / `MaterialHandle::dispatch` paths.
+  2. Keep wavefront-only data (`PixelState` arrays, ray/hit/escape queues) in SOA form for coalesced access while avoiding duplicate scene-specific SOAs.
+  3. Upload the contiguous `Primitive` array during `CudaWavefrontRenderer::Init` and reuse it for all kernel launches.
 - Notes:
-  - Wavefront can now piggyback on the megakernel uploader to obtain contiguous vectors per material/shape type before transposing into SOA form.
+  - Wavefront now iterates the same primitive data the megakernel uses, so intersection/shading logic remains unified across backends.
+  - Planned kernels for wavefront (minimal set):
+    - `GenerateCameraRays` ??fill ray/state queues for the first bounce.
+    - `IntersectPrimitives` ??traverse the device primitive array, write hit info + material handles.
+    - `ShadeScatter` ??read hits, fetch material data from `MaterialHandle`, spawn next-bounce rays and accumulate emission/throughput.
+    - `AccumulateFrame` ??write accumulated radiance to the film buffer.
+- Status:
+  - `CudaWavefrontRenderer::Init` now calls `BuildWavefrontSceneBuffers`, which uploads the primitive array plus remapped handles so device data always mirrors the CPU scene.
+
+#### Wavefront PixelState & Queue Plan
+- **PixelState layout**: POD struct per pixel with `Ray ray`, `glm::vec3 throughput`, `glm::vec3 radiance`, `glm::vec3 pendingEmission`, `glm::vec3 hitPosition`, `glm::vec3 hitNormal`, `uint32_t pixelIndex`, `uint32_t depth`, RNG state, `MaterialHandle material`, and `bool alive` so kernels only exchange pixel indices.
+- **Device queues**:
+  - `RayQueue`: pixel indices whose `PixelState.ray` must be intersected (seeded by `GenerateCameraRays`, appended in `ShadeScatter`).
+  - `PrimitiveWorkQueue`: `{ pixelIndex, primitiveIndex }` entries emitted after bucketing so shape-specialized kernels can stay coherent (future optimization).
+  - `HitQueue`: pixel indices that hit; shading kernels fetch the associated `PixelState` to continue the path.
+  - `AccumulatorQueue`: pixel indices that missed or terminated; `AccumulateFrame` drains it and writes `PixelState.radiance` into the film buffer.
+- **Kernel flow**:
+  1. `GenerateCameraRays` resets every `PixelState` (throughput=1, radiance=0, depth=0), writes primary rays, pushes all indices into `RayQueue`.
+  2. `RayQueueCompact` (future) drains `RayQueue`, bins work per primitive/shape and fills `PrimitiveWorkQueue` to keep intersection kernels coherent.
+  3. `IntersectPrimitives` reads the primitive array, updates best hits in `HitQueue`, and pushes misses into `AccumulatorQueue`.
+  4. `ShadeScatter` drains `HitQueue`, uses `MaterialHandle` to accumulate emission (`radiance += throughput * emitted`), updates throughput/depth, and either re-enqueues the pixel into `RayQueue` (new ray) or into `AccumulatorQueue` (finished).
+  5. `AccumulateFrame` drains `AccumulatorQueue`, writes radiance to the film accumulation buffer, and optionally resets completed PixelStates for the next frame.
+- **Lifetime**: Device primitives only change when `Init` runs; `PixelState`/queues persist across progressive frames so RNG seeds and accumulated radiance remain stable.
 
 ### 7. Simple Wavefront Renderer
 - Files: `src/backend/cuda_wavefront/renderer.{h,cu}`.
 - Actions:
-  - Implement a minimal wavefront renderer that consumes the new SOA data end-to-end, validating the shared packing pipeline and setting the stage for future optimizations.
+  - Implement the kernels above end-to-end (single-bounce is acceptable as a first pass), validating the shared packing pipeline and setting the stage for future optimizations.
 
 ### 8. Cleanup & Validation
 - Files: `src/core/material.h`, `src/core/shape.h`, `src/core/primitive.*`, renderers.

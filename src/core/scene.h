@@ -15,9 +15,7 @@ public:
 
     double GetSkyLightIntensity() const { return m_SkyLightIntensity; }
 
-    std::vector<PrimitiveHandleView> getCircleViews() const { return m_Primitives.getCircleViews(); }
-    std::vector<PrimitiveHandleView> getQuadViews() const { return m_Primitives.getQuadViews(); }
-    const std::vector<PrimitiveHandleView>& getPrimitiveViews() const { return m_Primitives.getPrimitiveViews(); }
+    const std::vector<Primitive>& GetPrimitives() const { return m_Primitives.GetPrimitives(); }
 
 private:
     MaterialPool m_Materials;

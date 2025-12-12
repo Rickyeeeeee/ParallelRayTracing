@@ -19,33 +19,28 @@ TODO
 
 namespace
 {
-QUAL_GPU bool IntersectPrimitive(const PrimitiveHandleView& primitive, const Ray& worldRay, SurfaceInteraction* outSi)
+QUAL_GPU bool IntersectPrimitive(const Primitive& primitive, const Ray& worldRay, SurfaceInteraction* outSi)
 {
     Ray rayLocal;
-    rayLocal.Origin = TransformPoint(primitive.transform.GetInvMat(), worldRay.Origin);
-    rayLocal.Direction = TransformNormal(primitive.transform.GetMat(), worldRay.Direction);
+    rayLocal.Origin = TransformPoint(primitive.Transform.GetInvMat(), worldRay.Origin);
+    rayLocal.Direction = TransformNormal(primitive.Transform.GetMat(), worldRay.Direction);
 
     SurfaceInteraction localSi;
-    bool hit = primitive.shape.dispatch([&](const auto* shape) {
-        if (!shape)
-            return false;
-        shape->Intersect(rayLocal, &localSi);
-        return localSi.HasIntersection;
-    });
+    bool hit = primitive.Shape.Intersect(rayLocal, &localSi);
 
-    if (!hit || !localSi.HasIntersection)
+    if (!hit)
         return false;
 
-    localSi.Position = TransformPoint(primitive.transform.GetMat(), localSi.Position);
-    localSi.Normal = TransformNormal(primitive.transform.GetInvMat(), localSi.Normal);
-    localSi.Material = primitive.material;
+    localSi.Position = TransformPoint(primitive.Transform.GetMat(), localSi.Position);
+    localSi.Normal = TransformNormal(primitive.Transform.GetInvMat(), localSi.Normal);
+    localSi.Material = primitive.Material;
     *outSi = localSi;
     return true;
 }
 
 QUAL_GPU bool IntersectSceneGPU(
     const Ray& ray,
-    const PrimitiveHandleView* primitives, int numPrimitives,
+    const Primitive* primitives, int numPrimitives,
     SurfaceInteraction* outSi,
     MaterialHandle* outMaterial)
 {
@@ -66,7 +61,7 @@ QUAL_GPU bool IntersectSceneGPU(
         {
             minDistance2 = dist2;
             bestIntersection = si;
-            bestMaterial = primitives[i].material;
+            bestMaterial = primitives[i].Material;
             hitAny = true;
         }
     }
@@ -82,35 +77,9 @@ QUAL_GPU bool IntersectSceneGPU(
     return true;
 }
 
-QUAL_GPU void DispatchMaterialEmit(const MaterialHandle& material, glm::vec3& emitted)
-{
-    emitted = glm::vec3(0.0f);
-    material.dispatch([&](const auto* mat) {
-        if (mat)
-            mat->Emit(emitted);
-    });
-}
-
-QUAL_GPU bool DispatchMaterialScatter(
-    const MaterialHandle& material,
-    const Ray& inRay,
-    const SurfaceInteraction& intersection,
-    glm::vec3& attenuation,
-    Ray& outRay,
-    curandState* rngState)
-{
-    bool scattered = false;
-    material.dispatch([&](const auto* mat) {
-        if (!mat)
-            return;
-        scattered = mat->Scatter(inRay, intersection, attenuation, outRay, rngState);
-    });
-    return scattered;
-}
-
 QUAL_GPU glm::vec3 TraceRayGPU(
     Ray ray,
-    const PrimitiveHandleView* primitives, int numPrimitives,
+    const Primitive* primitives, int numPrimitives,
     glm::vec3 skyLight,
     curandState* rngState,
     int maxDepth = 20)
@@ -131,12 +100,12 @@ QUAL_GPU glm::vec3 TraceRayGPU(
         }
 
         glm::vec3 emitted(0.0f);
-        DispatchMaterialEmit(material, emitted);
+        si.Material.Emit(emitted);
         L += throughput * emitted;
 
         glm::vec3 attenuation(0.0f);
         Ray scattered;
-        if (!DispatchMaterialScatter(material, ray, si, attenuation, scattered, rngState))
+        if (!si.Material.Scatter(ray, si, attenuation, scattered, rngState))
             break;
 
         throughput *= attenuation;
@@ -147,7 +116,18 @@ QUAL_GPU glm::vec3 TraceRayGPU(
     return L;
 }
 
-__global__ void GPU_RayTracing(float* colors, Camera * cam, PrimitiveHandleView* primitives, int primitiveCount, unsigned long long timeSeed)
+__global__ void InitRNGKernel(
+    curandState* rngStates,
+    uint32_t pixelCount,
+    uint64_t seed)
+{
+    uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= pixelCount) return;
+
+    curand_init(seed, idx, 0, &rngStates[idx]);
+}
+
+__global__ void GPU_RayTracing(float* colors, Camera* cam, Primitive* primitives, int primitiveCount, curandState* rngStates)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = (uint32_t)cam->GetWidth() * (uint32_t)cam->GetHeight();
@@ -159,15 +139,15 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, PrimitiveHandleView*
 
     Ray ray = cam->GetCameraRay((float)x + 0.5f, (float)y + 0.5f);
     
-    // initialize per-thread RNG state
     curandState localState;
-    unsigned long long seed = timeSeed ^ (0x9E3779B97F4A7C15ULL + (unsigned long long)idx * 0xBF58476D1CE4E5B9ULL);
-    curand_init(
-        seed,
-        (unsigned long long)idx,
-        0,
-        &localState
-    );
+    if (rngStates)
+    {
+        localState = rngStates[idx];
+    }
+    else
+    {
+        curand_init(0xC0FFEEULL, (unsigned long long)idx, 0, &localState);
+    }
 
     // Trace Ray
     glm::vec3 raycolor = (primitiveCount > 0)
@@ -178,6 +158,10 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, PrimitiveHandleView*
             &localState)
         : glm::vec3(0.4f, 0.3f, 0.6f);
 
+    if (rngStates)
+    {
+        rngStates[idx] = localState;
+    }
 
     // Method 1: GLM Normalize
     const uint32_t base = idx * 3;
@@ -189,11 +173,29 @@ __global__ void GPU_RayTracing(float* colors, Camera * cam, PrimitiveHandleView*
 }
 
 
+CudaMegakernelRenderer::~CudaMegakernelRenderer()
+{
+    if (m_RNGStates)
+    {
+        cudaFree(m_RNGStates);
+        m_RNGStates = nullptr;
+    }
+    m_RNGCapacity = 0;
+}
+
 void CudaMegakernelRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
 {
     m_Film = &film;
     m_Scene = &scene;
     m_Camera = &camera;
+
+    if (m_RNGStates)
+    {
+        cudaFree(m_RNGStates);
+        m_RNGStates = nullptr;
+    }
+    m_RNGCapacity = 0;
+    m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 }
 
 void CudaMegakernelRenderer::ProgressiveRender()
@@ -222,8 +224,25 @@ void CudaMegakernelRenderer::ProgressiveRender()
     cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
     // Scene data
     DeviceSceneData deviceScene = UploadSceneData();
-    // Random Seed
-    uint64_t seed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+
+    if (m_RNGSeed == 0)
+    {
+        m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    }
+
+    if (pixelCount > m_RNGCapacity)
+    {
+        if (m_RNGStates)
+        {
+            cudaFree(m_RNGStates);
+            m_RNGStates = nullptr;
+        }
+
+        cudaMalloc(&m_RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
+        m_RNGCapacity = pixelCount;
+
+        InitRNGKernel<<<blocks, threadsPerBlock>>>(reinterpret_cast<curandState*>(m_RNGStates), pixelCount, m_RNGSeed);
+    }
 
 
     GPU_RayTracing<<<blocks, threadsPerBlock>>>(
@@ -231,7 +250,7 @@ void CudaMegakernelRenderer::ProgressiveRender()
         d_cam,
         deviceScene.primitives,
         deviceScene.primitiveCount,
-        seed);
+        reinterpret_cast<curandState*>(m_RNGStates));
     cudaDeviceSynchronize();
     
     
@@ -259,7 +278,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!handle.IsValid())
             return nullptr;
 
-        auto it = materialRemap.find(handle.ptr);
+        auto it = materialRemap.find(handle.Ptr);
         if (it != materialRemap.end())
             return it->second;
 
@@ -276,7 +295,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!devicePtr)
             return nullptr;
 
-        materialRemap[handle.ptr] = devicePtr;
+        materialRemap[handle.Ptr] = devicePtr;
         data.materialAllocs.push_back(devicePtr);
         return devicePtr;
     };
@@ -285,7 +304,7 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!handle.IsValid())
             return nullptr;
 
-        auto it = shapeRemap.find(handle.ptr);
+        auto it = shapeRemap.find(handle.Ptr);
         if (it != shapeRemap.end())
             return it->second;
 
@@ -302,24 +321,24 @@ CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData(
         if (!devicePtr)
             return nullptr;
 
-        shapeRemap[handle.ptr] = devicePtr;
+        shapeRemap[handle.Ptr] = devicePtr;
         data.shapeAllocs.push_back(devicePtr);
         return devicePtr;
     };
 
-    const auto& hostPrimitives = m_Scene->getPrimitiveViews();
-    std::vector<PrimitiveHandleView> devicePrimitives(hostPrimitives.begin(), hostPrimitives.end());
+    const auto& hostPrimitives = m_Scene->GetPrimitives();
+    std::vector<Primitive> devicePrimitives(hostPrimitives.begin(), hostPrimitives.end());
 
     for (auto& primitive : devicePrimitives)
     {
-        primitive.material.ptr = uploadMaterial(primitive.material);
-        primitive.shape.ptr = uploadShape(primitive.shape);
+        primitive.Material.Ptr = uploadMaterial(primitive.Material);
+        primitive.Shape.Ptr = uploadShape(primitive.Shape);
     }
 
     data.primitiveCount = static_cast<int>(devicePrimitives.size());
     if (data.primitiveCount > 0)
     {
-        const size_t primitivesSize = sizeof(PrimitiveHandleView) * data.primitiveCount;
+        const size_t primitivesSize = sizeof(Primitive) * data.primitiveCount;
         cudaMalloc(reinterpret_cast<void**>(&data.primitives), primitivesSize);
         cudaMemcpy(data.primitives, devicePrimitives.data(), primitivesSize, cudaMemcpyHostToDevice);
     }

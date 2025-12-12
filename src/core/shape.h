@@ -5,6 +5,7 @@
 #include <cassert>
 #include <deque>
 #include <cmath>
+#include "tagged_pointer.h"
 
 enum class ShapeType : uint8_t
 {
@@ -80,31 +81,27 @@ private:
     glm::vec2 m_UVs[3]{};
 };
 
-template<typename F>
-QUAL_CPU_GPU decltype(auto) ShapeHandle::dispatch(F&& func) const
+
+using ShapeHandleBase = TaggedPointer<
+    ShapeType,
+    TaggedType<ShapeType, ShapeType::CIRCLE, Circle>,
+    TaggedType<ShapeType, ShapeType::QUAD, Quad>,
+    TaggedType<ShapeType, ShapeType::TRIANGLE, Triangle>>;
+
+struct ShapeHandle : public ShapeHandleBase
 {
-    switch (static_cast<ShapeType>(type))
-    {
-    case ShapeType::CIRCLE:
-        return func(static_cast<const Circle*>(ptr));
-    case ShapeType::QUAD:
-        return func(static_cast<const Quad*>(ptr));
-    case ShapeType::TRIANGLE:
-        return func(static_cast<const Triangle*>(ptr));
-    default:
-#ifndef __CUDA_ARCH__
-        assert(false && "Invalid ShapeHandle dispatch");
-#endif
-        return func(static_cast<const Circle*>(nullptr));
-    }
-}
+    using ShapeHandleBase::ShapeHandleBase;
+
+    QUAL_CPU_GPU bool Intersect(const Ray& ray, SurfaceInteraction* intersect) const;
+    QUAL_CPU_GPU AABB GetAABB(Transform* transform) const;
+};
+
+ShapeHandle MakeShapeHandle(ShapeType type, const void* shape);
+
 
 inline ShapeHandle MakeShapeHandle(ShapeType type, const void* shape)
 {
-    ShapeHandle handle;
-    handle.type = static_cast<uint8_t>(type);
-    handle.ptr = shape;
-    return handle;
+    return ShapeHandle{ type, shape };
 }
 
 struct ShapePool
@@ -129,6 +126,33 @@ struct ShapePool
 };
 
 constexpr float kShapeRayTMin = 0.001f;
+
+QUAL_CPU_GPU inline bool ShapeHandle::Intersect(const Ray& ray, SurfaceInteraction* intersect) const
+{
+    if (!IsValid() || !intersect)
+    {
+        if (intersect)
+            intersect->HasIntersection = false;
+        return false;
+    }
+    return dispatch([&](const auto* shape) {
+        if (!shape || !intersect)
+            return false;
+        shape->Intersect(ray, intersect);
+        return intersect->HasIntersection;
+    });
+}
+
+QUAL_CPU_GPU inline AABB ShapeHandle::GetAABB(Transform* transform) const
+{
+    if (!IsValid())
+        return AABB{};
+    return dispatch([&](const auto* shape) {
+        if (!shape)
+            return AABB{};
+        return shape->GetAABB(transform);
+    });
+}
 
 QUAL_CPU_GPU inline void Circle::Intersect(const Ray &ray, SurfaceInteraction* intersect) const
 {
