@@ -12,6 +12,7 @@ public:
 
 
     void SetData(const void* data);
+    void SetDataGPU(const void* d_data);
 
 
     uint32_t GetWidth() const { return m_Width; }

@@ -38,4 +38,8 @@ private:
     void* m_RNGStates = nullptr;
     uint32_t m_RNGCapacity = 0;
     uint64_t m_RNGSeed = 0;
+
+    float* deviceBuffer = nullptr;
+    Camera* d_cam;
+    DeviceSceneData deviceScene;
 };

@@ -39,6 +39,13 @@ void OpenGLTexture::SetData(const void* data)
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void OpenGLTexture::SetDataGPU(const void* d_data)
+{
+    glBindTexture(GL_TEXTURE_2D, m_TextureID);
+    // TODO: find an API to upload data from GPU memory directly
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 // Simple helper to read an entire text file into a std::string
 static std::string ReadFileToString(const char* path)
 {

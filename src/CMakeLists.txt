@@ -4,6 +4,7 @@ file(GLOB CPP_SOURCE
     *.cpp
     *.cu
     core/*.cpp
+    core/*.cu
     backend/*.cpp
     backend/cpu/*.cpp
     backend/cuda_megakernel/*.cpp

@@ -49,6 +49,7 @@ QUAL_GPU bool IntersectSceneGPU(
     SurfaceInteraction bestIntersection;
     MaterialHandle bestMaterial;
 
+    // #pragma unroll
     for (int i = 0; i < numPrimitives; ++i)
     {
         SurfaceInteraction si;
@@ -87,6 +88,7 @@ QUAL_GPU glm::vec3 TraceRayGPU(
     glm::vec3 L(0.0f);
     glm::vec3 throughput(1.0f);
 
+    // #pragma unroll
     for (int depth = 0; depth < maxDepth; ++depth)
     {
         SurfaceInteraction si;
@@ -196,6 +198,20 @@ void CudaMegakernelRenderer::Init(Film& film, const Scene& scene, const Camera& 
     }
     m_RNGCapacity = 0;
     m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+
+    const uint32_t width = m_Film->GetWidth();
+    const uint32_t height = m_Film->GetHeight();
+    const uint32_t pixelCount = width * height;
+
+    const size_t bufferSize = static_cast<size_t>(pixelCount) * 3 * sizeof(float);
+
+    cudaMalloc(&deviceBuffer, bufferSize);
+    // Camera
+    cudaMalloc(&d_cam, sizeof(Camera));
+    cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    // Scene data
+    deviceScene = UploadSceneData();
+    cudaMalloc(&m_RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
 }
 
 void CudaMegakernelRenderer::ProgressiveRender()
@@ -212,18 +228,8 @@ void CudaMegakernelRenderer::ProgressiveRender()
 
     const size_t bufferSize = static_cast<size_t>(pixelCount) * 3 * sizeof(float);
 
-    float* deviceBuffer = nullptr;
-    cudaMalloc(&deviceBuffer, bufferSize);
-
-    const uint32_t threadsPerBlock = 256;
+    const uint32_t threadsPerBlock = 128;
     const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
-
-    // Camera
-    Camera* d_cam;
-    cudaMalloc(&d_cam, sizeof(Camera));
-    cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
-    // Scene data
-    DeviceSceneData deviceScene = UploadSceneData();
 
     if (m_RNGSeed == 0)
     {
@@ -232,15 +238,7 @@ void CudaMegakernelRenderer::ProgressiveRender()
 
     if (pixelCount > m_RNGCapacity)
     {
-        if (m_RNGStates)
-        {
-            cudaFree(m_RNGStates);
-            m_RNGStates = nullptr;
-        }
-
-        cudaMalloc(&m_RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
         m_RNGCapacity = pixelCount;
-
         InitRNGKernel<<<blocks, threadsPerBlock>>>(reinterpret_cast<curandState*>(m_RNGStates), pixelCount, m_RNGSeed);
     }
 
@@ -254,15 +252,16 @@ void CudaMegakernelRenderer::ProgressiveRender()
     cudaDeviceSynchronize();
     
     
-    // Render
-    std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
-    cudaMemcpy(hostBuffer.data(), deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
+    // // CPU FILM
+    // std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
+    // cudaMemcpy(hostBuffer.data(), deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
+    // m_Film->AddSampleBuffer(hostBuffer.data());
+    // GPU FILM
+    m_Film->AddSampleBufferGPU(deviceBuffer);
 
-    m_Film->AddSampleBuffer(hostBuffer.data());
-
-    cudaFree(deviceBuffer);
-    cudaFree(d_cam);
-    FreeDeviceScene(deviceScene);
+    // cudaFree(deviceBuffer);
+    // cudaFree(d_cam);
+    // FreeDeviceScene(deviceScene);
 }
 
 CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData() const

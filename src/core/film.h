@@ -4,6 +4,8 @@
 
 #include <vector>
 #include <cmath>
+#include <cuda_runtime.h>
+
 
 class Film
 {
@@ -24,10 +26,12 @@ public:
     // Add one sample per pixel from a full-frame buffer:
     // rgb has size = width * height * 3 (interleaved RGB, row-major).
     void AddSampleBuffer(const float* rgb, float weight = 1.0f);
+    void AddSampleBufferGPU(const float* d_rgb, float weight = 1.0f);
 
     // Convert accumulated linear RGB to 8-bit RGBA for display.
     // Simple tonemapping + gamma.
     void UpdateDisplay(float exposure = 1.0f, float gamma = 2.2f);
+    void UpdateDisplayGPU(float exposure = 1.0f, float gamma = 2.2f);
 
     // Pointer suitable for OpenGLTexture::SetData (RGBA8)
     const uint8_t* GetDisplayData() const { return m_Display.data(); }
@@ -43,12 +47,15 @@ private:
     // Accumulated color (linear RGB), per pixel:
     // m_Accum[3 * (y * width + x) + c]
     std::vector<float>   m_Accum;
+    float* d_Accum;
 
     // Per-pixel total weight (number of samples, or sum of weights)
     std::vector<float>   m_Weights;
+    float* d_Weights;
 
     // Display buffer in RGBA8
     std::vector<uint8_t> m_Display;
+    uint8_t* d_Display;
 
     uint32_t m_Samples = 0; // global sample counter (for UI etc.)
 
