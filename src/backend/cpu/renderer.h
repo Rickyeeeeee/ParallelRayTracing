@@ -17,6 +17,7 @@ public:
 
     virtual void Init(Film& film, const Scene& scene, const Camera& camera) override;
     virtual void ProgressiveRender() override;
+    void SetCamera(const Camera& camera) override;
 
 private:
 

@@ -7,6 +7,11 @@ void CPURenderer::Init(Film& film, const Scene& scene, const Camera& camera)
     film.Clear();
     this->m_Film = &film;
     this->m_Scene = &scene;
+    SetCamera(camera);
+}
+
+void CPURenderer::SetCamera(const Camera& camera)
+{
     this->m_Camera = &camera;
 }
 

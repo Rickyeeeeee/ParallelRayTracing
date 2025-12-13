@@ -30,6 +30,19 @@
 #include <vector>
 #include <chrono>
 
+namespace
+{
+double g_MouseScrollDelta = 0.0;
+GLFWscrollfun g_ImguiScrollCallback = nullptr;
+
+void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    g_MouseScrollDelta += yoffset;
+    if (g_ImguiScrollCallback)
+        g_ImguiScrollCallback(window, xoffset, yoffset);
+}
+}
+
 bool checkCUDA() {
     int deviceCount = 0;
     cudaError_t err = cudaGetDeviceCount(&deviceCount);
@@ -80,8 +93,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    uint32_t windowWidth = 1200;
-    uint32_t windowHeight = 900;
+    uint32_t windowWidth = 1920;
+    uint32_t windowHeight = 1080;
     GLFWwindow* window =
         glfwCreateWindow(windowWidth, windowHeight, "System Check: OpenGL + CUDA + OptiX + ImGui", nullptr, nullptr);
 
@@ -119,6 +132,7 @@ int main() {
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 450");
+    g_ImguiScrollCallback = glfwSetScrollCallback(window, ScrollCallback);
 
     // Initialization
     Film film{ windowWidth, windowHeight };
@@ -153,7 +167,7 @@ int main() {
 
     film.Clear();
 
-    int selectedRenderer = 0;
+    int selectedRenderer = 3;
 
     std::shared_ptr<OpenGLTexture> frame = std::make_shared<OpenGLTexture>(windowWidth, windowHeight);
     double lastRenderMs = 0.0;
@@ -174,6 +188,9 @@ int main() {
     // Main Loop
     // --------------------------
     double lastTime = glfwGetTime();
+    double lastCursorX = 0.0;
+    double lastCursorY = 0.0;
+    bool cursorInitialized = false;
     while (!glfwWindowShouldClose(window)) {
         double currentTime = glfwGetTime();
         double delta = currentTime - lastTime;
@@ -184,7 +201,67 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        double cursorX = 0.0;
+        double cursorY = 0.0;
+        glfwGetCursorPos(window, &cursorX, &cursorY);
+        if (!cursorInitialized)
+        {
+            lastCursorX = cursorX;
+            lastCursorY = cursorY;
+            cursorInitialized = true;
+        }
+        const double cursorDeltaX = cursorX - lastCursorX;
+        const double cursorDeltaY = cursorY - lastCursorY;
+        lastCursorX = cursorX;
+        lastCursorY = cursorY;
+
+        bool cameraUpdated = false;
+        const bool windowFocused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+        const bool allowCameraInput = windowFocused && !io.WantCaptureMouse;
+
+        // mouse scroll
+        const double scrollDelta = g_MouseScrollDelta;
+        g_MouseScrollDelta = 0.0;
+        if (allowCameraInput && scrollDelta != 0.0)
+        {
+            float speed = 0.7f; // Adjust zoom speed as needed
+            camera.Zoom(static_cast<float>(scrollDelta) * speed);
+            cameraUpdated = true;
+        }
+
+        const bool leftMousedragging = allowCameraInput && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        const bool rightMousedragging = allowCameraInput && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+        if (leftMousedragging)
+        {
+            float speed = 150.0f; // Adjust speed as needed
+            camera.Rotate(
+                static_cast<float>(-cursorDeltaY) * speed / windowWidth, 
+                static_cast<float>(-cursorDeltaX) * speed / windowHeight);
+            cameraUpdated = true;
+        }
+
+        if (rightMousedragging)
+        {
+            float speed = 10.0f; // Adjust speed as needed
+            camera.Translate(
+                static_cast<float>(-cursorDeltaX) * speed / windowWidth, 
+                static_cast<float>(cursorDeltaY) * speed / windowHeight);
+            cameraUpdated = true;
+        }
+
         // System check window
+        glm::vec3 prevCamPos = camera.GetPosition();
+        glm::vec3 prevCamDir = camera.GetViewDir();
+        camera.Update(static_cast<float>(delta));
+        if (!cameraUpdated)
+        {
+            if (glm::distance(prevCamPos, camera.GetPosition()) > 1e-5f ||
+                glm::distance(prevCamDir, camera.GetViewDir()) > 1e-5f)
+            {
+                cameraUpdated = true;
+            }
+        }
+
         ImGui::Begin("System Diagnostics");
 
         ImGui::Text("FPS: %.3f", 1.0 / delta);
@@ -402,6 +479,8 @@ int main() {
             {
                 selectedRenderer = i;
                 film.Clear();
+                if (rendererOptions[i].Instance)
+                    rendererOptions[i].Instance->SetCamera(camera);
             }
         }
 
@@ -424,6 +503,12 @@ int main() {
         }
         if (activeRenderer)
         {
+            if (cameraUpdated)
+            {
+                activeRenderer->SetCamera(camera);
+                film.Clear();
+                cameraUpdated = false;
+            }
             const auto t0 = std::chrono::high_resolution_clock::now();
             activeRenderer->ProgressiveRender();
             const auto t1 = std::chrono::high_resolution_clock::now();

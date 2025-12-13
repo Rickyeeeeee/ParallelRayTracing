@@ -940,6 +940,12 @@ void OptixRenderer::updateLaunchParams()
         &launchParams, sizeof(LaunchParams), cudaMemcpyHostToDevice));
 }
 
+void OptixRenderer::SetCamera(const Camera& camera)
+{
+    m_Camera = &camera;
+    m_FrameIndex = 0;
+}
+
 void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
 {
     if (m_Initialized)
@@ -947,7 +953,7 @@ void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
 
     m_Film = &film;
     m_Scene = &scene;
-    m_Camera = &camera;
+    SetCamera(camera);
     
     film.Clear();
     

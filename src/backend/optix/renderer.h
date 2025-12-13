@@ -36,6 +36,7 @@ public:
     
     // Legacy CPU path (for compatibility)
     void ProgressiveRender() override;
+    void SetCamera(const Camera& camera) override;
 
 private:
     // Initialization helpers

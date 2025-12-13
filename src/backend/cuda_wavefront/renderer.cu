@@ -352,7 +352,6 @@ void CudaWavefrontRenderer::Init(Film& film, const Scene& scene, const Camera& c
 {
     m_Film = &film;
     m_Scene = &scene;
-    m_Camera = &camera;
     m_FrameIndex = 0;
     m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
@@ -367,9 +366,7 @@ void CudaWavefrontRenderer::Init(Film& film, const Scene& scene, const Camera& c
     const uint32_t height = m_Film ? m_Film->GetHeight() : 0u;
     const uint32_t pixelCount = width * height;
     AllocateDeviceState(pixelCount);
-
-    if (m_DeviceCamera && m_Camera)
-        cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    SetCamera(camera);
 }
 
 void CudaWavefrontRenderer::ProgressiveRender()
@@ -393,6 +390,7 @@ void CudaWavefrontRenderer::ProgressiveRender()
         || !m_RayQueues[0].IsValid() || !m_RayQueues[1].IsValid() || !m_Queues.HitQueue.IsValid())
         return;
 
+    UploadCameraToDevice();
 
     const uint32_t threadsPerBlock = 256;
     const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
@@ -428,7 +426,6 @@ void CudaWavefrontRenderer::ProgressiveRender()
      }
 
     BlitRadianceKernel<<<blocks, threadsPerBlock>>>(m_PixelState, m_DeviceFilmBuffer, pixelCount);
-    std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
     cudaDeviceSynchronize();
 
     m_Film->AddSampleBufferGPU(m_DeviceFilmBuffer);
@@ -478,6 +475,8 @@ void CudaWavefrontRenderer::AllocateDeviceState(uint32_t pixelCount)
     hitQueue.Capacity = pixelCount;
 
     cudaMalloc(&m_DeviceCamera, sizeof(Camera));
+    m_CameraDirty = true;
+    UploadCameraToDevice();
 
     if (m_RNGSeed == 0)
         m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
@@ -530,4 +529,19 @@ void CudaWavefrontRenderer::ReleaseDeviceState()
     m_DeviceFilmPixelCount = 0;
 
     freePtr(m_DeviceCamera);
+}
+
+void CudaWavefrontRenderer::SetCamera(const Camera& camera)
+{
+    m_Camera = &camera;
+    m_CameraDirty = true;
+    UploadCameraToDevice();
+}
+
+void CudaWavefrontRenderer::UploadCameraToDevice()
+{
+    if (!m_CameraDirty || !m_DeviceCamera || !m_Camera)
+        return;
+    cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    m_CameraDirty = false;
 }

@@ -16,6 +16,7 @@ public:
 
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
     void ProgressiveRender() override;
+    void SetCamera(const Camera& camera) override;
 
 private:
     struct DeviceSceneData
@@ -40,6 +41,6 @@ private:
     uint64_t m_RNGSeed = 0;
 
     float* deviceBuffer = nullptr;
-    Camera* d_cam;
+    Camera* d_cam = nullptr;
     DeviceSceneData deviceScene;
 };

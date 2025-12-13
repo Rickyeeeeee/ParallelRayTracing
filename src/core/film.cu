@@ -80,7 +80,10 @@ __global__ void addBufferGPU(const float* d_rgb, float* d_Accum, float* d_Weight
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= pixelCount) return;
 
-    d_Accum[idx] += d_rgb[idx] * weight;
+    const uint32_t base = idx * 3;
+    d_Accum[base + 0] += d_rgb[base + 0] * weight;
+    d_Accum[base + 1] += d_rgb[base + 1] * weight;
+    d_Accum[base + 2] += d_rgb[base + 2] * weight;
     d_Weights[idx] += weight;
 }
 
@@ -90,7 +93,7 @@ void Film::AddSampleBufferGPU(const float* d_rgb, float weight)
     if (!d_rgb || pixelCount == 0)
         return;
 
-    addBufferGPU<<<(pixelCount * 3 + 255) / 256, 256>>>(d_rgb, d_Accum, d_Weights, pixelCount * 3, weight);
+    addBufferGPU<<<(pixelCount + 255) / 256, 256>>>(d_rgb, d_Accum, d_Weights, pixelCount, weight);
     // cudaMemcpy(m_Accum.data(), d_Accum, pixelCount * 3 * sizeof(float), cudaMemcpyDeviceToHost);
     // cudaMemcpy(m_Weights.data(), d_Weights, (pixelCount) * sizeof(float), cudaMemcpyDeviceToHost);
 }
@@ -100,8 +103,17 @@ __global__ void updateDisplayKernel(const float* d_Accum, const float* d_Weights
     uint32_t pixelCount = width * height;
 
     float w = d_Weights[idx / 4];
-    float invW = 1.0f / w;
-    float value = (idx % 4 == 3) ? 255.0f : d_Accum[3 * (idx / 4) + (idx % 4)] * invW;
+    float value = 0.0f;
+    if (idx % 4 == 3)
+    {
+        value = 255.0f;
+    }
+    else if (w > 0.0f)
+    {
+        float invW = 1.0f / w;
+        value = d_Accum[3 * (idx / 4) + (idx % 4)] * invW;
+    }
+
     value = value * exposure / (1.0f + value * exposure);
     value = powf(value, invGamma);
 

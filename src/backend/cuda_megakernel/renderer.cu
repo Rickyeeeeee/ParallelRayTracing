@@ -208,7 +208,7 @@ void CudaMegakernelRenderer::Init(Film& film, const Scene& scene, const Camera& 
     cudaMalloc(&deviceBuffer, bufferSize);
     // Camera
     cudaMalloc(&d_cam, sizeof(Camera));
-    cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    SetCamera(camera);
     // Scene data
     deviceScene = UploadSceneData();
     cudaMalloc(&m_RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
@@ -262,6 +262,15 @@ void CudaMegakernelRenderer::ProgressiveRender()
     // cudaFree(deviceBuffer);
     // cudaFree(d_cam);
     // FreeDeviceScene(deviceScene);
+}
+
+void CudaMegakernelRenderer::SetCamera(const Camera& camera)
+{
+    m_Camera = &camera;
+    if (d_cam && m_Camera)
+    {
+        cudaMemcpy(d_cam, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    }
 }
 
 CudaMegakernelRenderer::DeviceSceneData CudaMegakernelRenderer::UploadSceneData() const

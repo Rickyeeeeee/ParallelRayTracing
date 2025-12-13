@@ -12,4 +12,5 @@ public:
 
     virtual void Init(Film& film, const Scene& scene, const Camera& camera) = 0;
     virtual void ProgressiveRender() = 0;
+    virtual void SetCamera(const Camera& camera) = 0;
 };

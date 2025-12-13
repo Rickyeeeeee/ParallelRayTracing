@@ -85,6 +85,7 @@ public:
 
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
     void ProgressiveRender() override;
+    void SetCamera(const Camera& camera) override;
 
  private:
     Film* m_Film = nullptr;
@@ -102,7 +103,9 @@ public:
     float* m_DeviceFilmBuffer = nullptr;
     uint32_t m_DeviceFilmPixelCount = 0;
     Camera* m_DeviceCamera = nullptr;
+    bool m_CameraDirty = false;
 
     void AllocateDeviceState(uint32_t pixelCount);
     void ReleaseDeviceState();
+    void UploadCameraToDevice();
 };
