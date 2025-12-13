@@ -99,8 +99,10 @@ public:
     RayQueueSOA m_RayQueues[2]{};
     WavefrontQueues m_Queues{};
 
+    float* m_DeviceFilmBuffer = nullptr;
+    uint32_t m_DeviceFilmPixelCount = 0;
     Camera* m_DeviceCamera = nullptr;
 
-    void EnsureDeviceState(uint32_t pixelCount);
+    void AllocateDeviceState(uint32_t pixelCount);
     void ReleaseDeviceState();
 };

@@ -362,6 +362,14 @@ void CudaWavefrontRenderer::Init(Film& film, const Scene& scene, const Camera& c
     {
         m_SceneBuffers = BuildWavefrontSceneBuffers(m_Scene->GetPrimitives());
     }
+
+    const uint32_t width = m_Film ? m_Film->GetWidth() : 0u;
+    const uint32_t height = m_Film ? m_Film->GetHeight() : 0u;
+    const uint32_t pixelCount = width * height;
+    AllocateDeviceState(pixelCount);
+
+    if (m_DeviceCamera && m_Camera)
+        cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
 }
 
 void CudaWavefrontRenderer::ProgressiveRender()
@@ -377,17 +385,13 @@ void CudaWavefrontRenderer::ProgressiveRender()
         return;
 
     const size_t bufferSize = static_cast<size_t>(pixelCount) * 3 * sizeof(float);
-    
-    float* deviceBuffer = nullptr;
-    cudaMalloc(&deviceBuffer, bufferSize);
 
-    EnsureDeviceState(pixelCount);
-    if (!m_PixelState.RayOrigins || !m_PixelState.RayDirections || !m_PixelState.Throughput || !m_PixelState.Radiance || !m_DeviceCamera
-        || !m_RayQueues[0].IsValid() || !m_RayQueues[1].IsValid()
-        || !m_Queues.HitQueue.IsValid())
+    if (pixelCount != m_DeviceFilmPixelCount || !m_DeviceFilmBuffer)
         return;
 
-    cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
+    if (!m_PixelState.RayOrigins || !m_PixelState.RayDirections || !m_PixelState.Throughput || !m_PixelState.Radiance || !m_DeviceCamera
+        || !m_RayQueues[0].IsValid() || !m_RayQueues[1].IsValid() || !m_Queues.HitQueue.IsValid())
+        return;
 
 
     const uint32_t threadsPerBlock = 256;
@@ -421,17 +425,13 @@ void CudaWavefrontRenderer::ProgressiveRender()
         // cudaMemcpy(&nextRayCount, m_RayQueues[currRay].Count, sizeof(uint32_t), cudaMemcpyDeviceToHost);
         // if (nextRayCount == 0)
         //     break;
-    }
+     }
 
-    BlitRadianceKernel<<<blocks, threadsPerBlock>>>(m_PixelState, deviceBuffer, pixelCount);
+    BlitRadianceKernel<<<blocks, threadsPerBlock>>>(m_PixelState, m_DeviceFilmBuffer, pixelCount);
     std::vector<float> hostBuffer(static_cast<size_t>(pixelCount) * 3);
     cudaDeviceSynchronize();
 
-    cudaMemcpy(hostBuffer.data(), deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
-
-    m_Film->AddSampleBuffer(hostBuffer.data());
-
-    cudaFree(deviceBuffer);
+    m_Film->AddSampleBufferGPU(m_DeviceFilmBuffer);
 
     ++m_FrameIndex;
 }
@@ -442,69 +442,49 @@ CudaWavefrontRenderer::~CudaWavefrontRenderer()
     ReleaseDeviceState();
 }
 
-void CudaWavefrontRenderer::EnsureDeviceState(uint32_t pixelCount)
+void CudaWavefrontRenderer::AllocateDeviceState(uint32_t pixelCount)
 {
+    ReleaseDeviceState();
     if (pixelCount == 0)
         return;
 
-    auto reallocArray = [&](auto*& ptr, size_t elemSize) {
-        if (ptr)
-            cudaFree(ptr);
-        cudaMalloc(&ptr, elemSize * pixelCount);
-    };
+    m_DeviceFilmPixelCount = pixelCount;
+    const size_t bufferSize = static_cast<size_t>(pixelCount) * 3 * sizeof(float);
+    cudaMalloc(&m_DeviceFilmBuffer, bufferSize);
 
-    if (pixelCount > m_PixelState.Capacity)
+    cudaMalloc(&m_PixelState.RayOrigins, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.RayDirections, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.Throughput, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.Radiance, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.PathDepth, sizeof(uint32_t) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.RNGStates, sizeof(curandState) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&m_PixelState.Alive, sizeof(uint8_t) * static_cast<size_t>(pixelCount));
+    m_PixelState.Capacity = pixelCount;
+
+    for (auto& queue : m_RayQueues)
     {
-        reallocArray(m_PixelState.RayOrigins, sizeof(glm::vec3));
-        reallocArray(m_PixelState.RayDirections, sizeof(glm::vec3));
-        reallocArray(m_PixelState.Throughput, sizeof(glm::vec3));
-        reallocArray(m_PixelState.Radiance, sizeof(glm::vec3));
-        reallocArray(m_PixelState.PathDepth, sizeof(uint32_t));
-        reallocArray(m_PixelState.RNGStates, sizeof(curandState));
-        reallocArray(m_PixelState.Alive, sizeof(uint8_t));
-        m_PixelState.Capacity = pixelCount;
-
-        if (m_RNGSeed == 0)
-        {
-            m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-        }
-        const uint32_t threadsPerBlock = 256;
-        const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
-        InitRNGStatesKernel<<<blocks, threadsPerBlock>>>(m_PixelState, pixelCount, m_RNGSeed);
+        cudaMalloc(&queue.PixelIndices, sizeof(uint32_t) * static_cast<size_t>(pixelCount));
+        cudaMalloc(&queue.Count, sizeof(uint32_t));
+        queue.Capacity = pixelCount;
     }
 
-    auto ensureRayQueueCapacity = [&](RayQueueSOA& queue) {
-        if (pixelCount > queue.Capacity)
-        {
-            reallocArray(queue.PixelIndices, sizeof(uint32_t));
-            queue.Capacity = pixelCount;
-        }
-        if (!queue.Count)
-            cudaMalloc(&queue.Count, sizeof(uint32_t));
-    };
+    auto& hitQueue = m_Queues.HitQueue;
+    cudaMalloc(&hitQueue.PixelIndices, sizeof(uint32_t) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&hitQueue.HitPositions, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&hitQueue.HitNormals, sizeof(glm::vec3) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&hitQueue.Materials, sizeof(MaterialHandle) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&hitQueue.IsFrontFace, sizeof(uint8_t) * static_cast<size_t>(pixelCount));
+    cudaMalloc(&hitQueue.Count, sizeof(uint32_t));
+    hitQueue.Capacity = pixelCount;
 
-    auto ensureHitQueueCapacity = [&](HitQueueSOA& queue) {
-        if (pixelCount > queue.Capacity)
-        {
-            reallocArray(queue.PixelIndices, sizeof(uint32_t));
-            reallocArray(queue.HitPositions, sizeof(glm::vec3));
-            reallocArray(queue.HitNormals, sizeof(glm::vec3));
-            reallocArray(queue.Materials, sizeof(MaterialHandle));
-            reallocArray(queue.IsFrontFace, sizeof(uint8_t));
-            queue.Capacity = pixelCount;
-        }
-        if (!queue.Count)
-            cudaMalloc(&queue.Count, sizeof(uint32_t));
-    };
+    cudaMalloc(&m_DeviceCamera, sizeof(Camera));
 
-    ensureRayQueueCapacity(m_RayQueues[0]);
-    ensureRayQueueCapacity(m_RayQueues[1]);
-    ensureHitQueueCapacity(m_Queues.HitQueue);
+    if (m_RNGSeed == 0)
+        m_RNGSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
-    if (!m_DeviceCamera)
-    {
-        cudaMalloc(&m_DeviceCamera, sizeof(Camera));
-    }
+    const uint32_t threadsPerBlock = 256;
+    const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
+    InitRNGStatesKernel<<<blocks, threadsPerBlock>>>(m_PixelState, pixelCount, m_RNGSeed);
 }
 
 void CudaWavefrontRenderer::ReleaseDeviceState()
@@ -545,6 +525,9 @@ void CudaWavefrontRenderer::ReleaseDeviceState()
     freeRayQueue(m_RayQueues[0]);
     freeRayQueue(m_RayQueues[1]);
     freeHitQueue(m_Queues.HitQueue);
+
+    freePtr(m_DeviceFilmBuffer);
+    m_DeviceFilmPixelCount = 0;
 
     freePtr(m_DeviceCamera);
 }
