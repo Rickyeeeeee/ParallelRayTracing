@@ -17,6 +17,14 @@ Replace per-thread queue counter increments with a warp-aggregated scheme:
 Status:
 - Implemented for `RayQueueSOA::AllocateSlot` in `src/backend/cuda_wavefront/renderer.cu:58` (1 atomic per warp).
 
+## Optimization 2: Reduce Global Memory Traffic (Shrink PixelState)
+
+Move hit/miss-specific data out of `PixelStateSOA` into queue item SOAs to reduce per-pixel state size and avoid reading/writing large structures when only a subset of fields is needed.
+
+Status:
+- `HitQueueSOA` now stores hit items in SOA form (`pixelIndex`, hit position/normal, material handle, distance, front-face) and `EscapeQueueSOA` stores `pixelIndex` only (`src/backend/cuda_wavefront/renderer.h:48`).
+- `PixelStateSOA` no longer stores hit-specific arrays; it keeps only per-path state (ray, throughput, radiance, depth, RNG, alive) (`src/backend/cuda_wavefront/renderer.h:26`).
+
 ## Goals & Metrics
 
 - **Primary**: maximize samples/sec at fixed image quality.
