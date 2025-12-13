@@ -216,11 +216,25 @@ int main() {
             activeRenderer = rendererOptions[clampedIndex].Instance.get();
             selectedRenderer = clampedIndex;
         }
-
         if (activeRenderer)
-            activeRenderer->ProgressiveRender();
-        film.UpdateDisplay();
-        frame->SetData(film.GetDisplayData());
+        {
+            // Check if OptiX renderer for Zero-Copy fast path
+            OptixRenderer* optixRenderer = dynamic_cast<OptixRenderer*>(activeRenderer);
+            
+            if (optixRenderer)
+            {
+                //  Zero-Copy path: Direct GPU->OpenGL transfer
+                // No CPU involvement, no Film update needed
+                optixRenderer->ProgressiveRender(frame.get());
+            }
+            else
+            {
+                // Legacy CPU path for other renderers
+                activeRenderer->ProgressiveRender();
+                film.UpdateDisplay();
+                frame->SetData(film.GetDisplayData());
+            }
+        }
         openglRenderer.Draw(*frame);
         
 

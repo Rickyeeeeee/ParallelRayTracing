@@ -234,8 +234,41 @@ extern "C" __global__ void __raygen__renderFrame()
         rayDirection = payload.direction;
     }
     
-    // Write to output buffer
-    params.colorBuffer[pixelIndex] = finalColor;
+    // GPU Temporal Accumulation for Noise-Free Convergence
+    // ---------------------------------------------------
+    
+    // 1. Read previous accumulated value or start fresh
+    float3 accumColor = finalColor;
+    
+    if (params.frameIndex > 0)
+    {
+        // Add new sample to running sum
+        float3 prevAccum = params.accumBuffer[pixelIndex];
+        accumColor = prevAccum + finalColor;
+    }
+    
+    // 2. Save accumulated sum for next frame
+    params.accumBuffer[pixelIndex] = accumColor;
+    
+    // 3. Compute average (for display)
+    float3 averagedColor = accumColor / (float)(params.frameIndex + 1);
+    
+    // 4. Tone Mapping & Gamma Correction on AVERAGED result
+    // (Apply to converged value, not single noisy sample)
+    
+    // Reinhard Tone Mapping: HDR [0, inf) -> LDR [0, 1]
+    averagedColor.x = averagedColor.x / (1.0f + averagedColor.x);
+    averagedColor.y = averagedColor.y / (1.0f + averagedColor.y);
+    averagedColor.z = averagedColor.z / (1.0f + averagedColor.z);
+    
+    // Gamma Correction: Linear -> sRGB (Gamma 2.2)
+    const float invGamma = 1.0f / 2.2f;
+    averagedColor.x = powf(averagedColor.x, invGamma);
+    averagedColor.y = powf(averagedColor.y, invGamma);
+    averagedColor.z = powf(averagedColor.z, invGamma);
+    
+    // Write display-ready result to output buffer (PBO)
+    params.colorBuffer[pixelIndex] = averagedColor;
 }
 
 //------------------------------------------------------------------------------

@@ -26,6 +26,26 @@
 #include <core/camera.h>
 #include <core/film.h>
 
+// OpenGL includes for Zero-Copy interop
+#include <opengl/opengl_utils.h>
+
+//------------------------------------------------------------------------------
+// Rendering Constants (extracted from CPU renderer source)
+//------------------------------------------------------------------------------
+
+namespace {
+
+// Sky light color from CPU renderer.h:29
+constexpr float SKY_R = 0.4f;
+constexpr float SKY_G = 0.3f;
+constexpr float SKY_B = 0.6f;
+
+// Material constants
+constexpr float GLASS_REFRACTION_INDEX = 0.9f;  // From CPU scene.h
+constexpr float METAL_ROUGHNESS = 0.01f;        // Mirror-like metal
+
+} // anonymous namespace
+
 //------------------------------------------------------------------------------
 // Macros for error checking
 //------------------------------------------------------------------------------
@@ -138,11 +158,22 @@ void OptixRenderer::cleanup()
     
     // Free device buffers
     if (m_d_ColorBuffer)   cudaFree(reinterpret_cast<void*>(m_d_ColorBuffer));
+    if (m_d_AccumBuffer)   cudaFree(reinterpret_cast<void*>(m_d_AccumBuffer));
     if (m_d_LaunchParams)  cudaFree(reinterpret_cast<void*>(m_d_LaunchParams));
     if (m_d_SphereData)    cudaFree(reinterpret_cast<void*>(m_d_SphereData));
     if (m_d_QuadData)      cudaFree(reinterpret_cast<void*>(m_d_QuadData));
     if (m_d_TriangleData)  cudaFree(reinterpret_cast<void*>(m_d_TriangleData));
     if (m_d_Materials)     cudaFree(reinterpret_cast<void*>(m_d_Materials));
+    
+    // Free OpenGL Interop resources
+    if (m_CudaGraphicsResource) {
+        cudaGraphicsUnregisterResource(m_CudaGraphicsResource);
+        m_CudaGraphicsResource = nullptr;
+    }
+    if (m_PBO) {
+        glDeleteBuffers(1, &m_PBO);
+        m_PBO = 0;
+    }
     
     // Free acceleration structures (IAS and per-geometry GAS)
     if (m_IasBuffer)       cudaFree(reinterpret_cast<void*>(m_IasBuffer));
@@ -465,7 +496,7 @@ void OptixRenderer::uploadSceneData()
         DeviceMaterial mat;
         mat.type = MaterialType::Dielectric;
         mat.albedo = make_float3(1.0f, 1.0f, 1.0f);
-        mat.refractionIndex = 0.9f;  // Match CPU scene.h scene configuration
+        mat.refractionIndex = GLASS_REFRACTION_INDEX;  // From CPU scene.h
         materials.push_back(mat);
         
         SphereData sphere;
@@ -480,7 +511,7 @@ void OptixRenderer::uploadSceneData()
         DeviceMaterial mat;
         mat.type = MaterialType::Metal;
         mat.albedo = make_float3(1.0f, 0.7f, 0.8f);
-        mat.roughness = 0.01f;
+        mat.roughness = METAL_ROUGHNESS;  // Mirror-like surface
         materials.push_back(mat);
         
         SphereData sphere;
@@ -729,6 +760,25 @@ void OptixRenderer::buildAccelerationStructure()
 
 void OptixRenderer::updateLaunchParams()
 {
+    // Camera movement detection for accumulation reset
+    static glm::vec3 lastPos = glm::vec3(0.0f);
+    static glm::vec3 lastDir = glm::vec3(0.0f);
+    
+    glm::vec3 currentPos = m_Camera->GetPosition();
+    glm::vec3 currentDir = m_Camera->GetViewDir();
+    
+    // Reset frame index if camera moved
+    if (currentPos != lastPos || currentDir != lastDir) {
+        m_FrameIndex = 0;
+        // Clear accumulation buffer
+        if (m_d_AccumBuffer && m_Film) {
+            size_t bufferSize = sizeof(float3) * m_Film->GetWidth() * m_Film->GetHeight();
+            CUDA_CHECK(cudaMemset(reinterpret_cast<void*>(m_d_AccumBuffer), 0, bufferSize));
+        }
+        lastPos = currentPos;
+        lastDir = currentDir;
+    }
+    
     LaunchParams launchParams = {};
     
     // Camera
@@ -767,11 +817,10 @@ void OptixRenderer::updateLaunchParams()
     launchParams.traversable = m_TraversableHandle;
     launchParams.maxDepth = m_MaxDepth;
     
-    // EXACT CPU REPLICA: Use exact color from CPU renderer.h line 29
-    // glm::vec3 m_SkyLight{ 0.4f, 0.3f, 0.6f };
-    // No gradient, no intensity multiplier - direct copy
-    launchParams.skyLight = make_float3(0.4f, 0.3f, 0.6f);
+    // Sky light from constants (CPU renderer.h:29)
+    launchParams.skyLight = make_float3(SKY_R, SKY_G, SKY_B);
     launchParams.colorBuffer = reinterpret_cast<float3*>(m_d_ColorBuffer);
+    launchParams.accumBuffer = reinterpret_cast<float3*>(m_d_AccumBuffer);
     
     CUDA_CHECK(cudaMemcpy(
         reinterpret_cast<void*>(m_d_LaunchParams),
@@ -796,9 +845,27 @@ void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
         buildAccelerationStructure();
         buildSBT();
         
-        // Allocate output buffer
+        // Allocate output buffers
         size_t bufferSize = sizeof(float3) * film.GetWidth() * film.GetHeight();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_ColorBuffer), bufferSize));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_AccumBuffer), bufferSize));
+        
+        // Initialize accumulation buffer to zero
+        CUDA_CHECK(cudaMemset(reinterpret_cast<void*>(m_d_AccumBuffer), 0, bufferSize));
+        
+        // Create OpenGL PBO for Zero-Copy rendering
+        glGenBuffers(1, &m_PBO);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_PBO);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, bufferSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        
+        // Register PBO with CUDA for interop
+        CUDA_CHECK(cudaGraphicsGLRegisterBuffer(
+            &m_CudaGraphicsResource,
+            m_PBO,
+            cudaGraphicsMapFlagsWriteDiscard));
+        
+        std::cout << "[OptixRenderer] OpenGL PBO created and registered with CUDA\n";
         
         // Allocate launch params
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_LaunchParams), sizeof(LaunchParams)));
@@ -852,5 +919,87 @@ void OptixRenderer::ProgressiveRender()
     }
     
     m_Film->AddSampleBuffer(rgb.data());
+    m_FrameIndex++;
+}
+
+// Zero-Copy rendering with OpenGL Interop
+void OptixRenderer::ProgressiveRender(OpenGLTexture* targetTexture)
+{
+    if (!m_Initialized || !m_Film) return;
+    
+    const uint32_t width = m_Film->GetWidth();
+    const uint32_t height = m_Film->GetHeight();
+    
+    if (width == 0 || height == 0) return;
+    
+    updateLaunchParams();
+    
+    // Launch OptiX rendering
+    OPTIX_CHECK(optixLaunch(
+        m_Pipeline,
+        m_Stream,
+        m_d_LaunchParams,
+        sizeof(LaunchParams),
+        &m_SBT,
+        width, height, 1));
+    
+    if (targetTexture)
+    {
+        // Zero-Copy path: Direct GPU-to-GPU transfer
+        
+        // 1. Map PBO to get CUDA pointer
+        CUDA_CHECK(cudaGraphicsMapResources(1, &m_CudaGraphicsResource, m_Stream));
+        
+        void* pbo_d_ptr = nullptr;
+        size_t num_bytes = 0;
+        CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(&pbo_d_ptr, &num_bytes, m_CudaGraphicsResource));
+        
+        // 2. Device-to-Device copy (OptiX buffer -> PBO)
+        // This is extremely fast as data stays in VRAM
+        CUDA_CHECK(cudaMemcpyAsync(
+            pbo_d_ptr,
+            reinterpret_cast<void*>(m_d_ColorBuffer),
+            width * height * sizeof(float3),
+            cudaMemcpyDeviceToDevice,
+            m_Stream));
+        
+        // 3. Unmap PBO
+        CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_CudaGraphicsResource, m_Stream));
+        
+        // 4. Synchronize to ensure copy is complete
+        CUDA_CHECK(cudaStreamSynchronize(m_Stream));
+        
+        // 5. Update OpenGL texture from PBO
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_PBO);
+        glBindTexture(GL_TEXTURE_2D, targetTexture->GetTextureID());
+        
+        // Transfer from PBO to texture (last param is 0 because PBO is bound)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGB, GL_FLOAT, 0);
+        
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
+    else
+    {
+        // Fallback to slow CPU path if no texture provided
+        CUDA_CHECK(cudaStreamSynchronize(m_Stream));
+        
+        std::vector<float3> colorBuffer(width * height);
+        CUDA_CHECK(cudaMemcpy(
+            colorBuffer.data(),
+            reinterpret_cast<void*>(m_d_ColorBuffer),
+            sizeof(float3) * width * height,
+            cudaMemcpyDeviceToHost));
+        
+        std::vector<float> rgb(width * height * 3);
+        for (size_t i = 0; i < colorBuffer.size(); ++i) {
+            rgb[i * 3 + 0] = colorBuffer[i].x;
+            rgb[i * 3 + 1] = colorBuffer[i].y;
+            rgb[i * 3 + 2] = colorBuffer[i].z;
+        }
+        
+        m_Film->AddSampleBuffer(rgb.data());
+    }
+    
     m_FrameIndex++;
 }

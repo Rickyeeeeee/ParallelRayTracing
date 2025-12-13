@@ -11,8 +11,13 @@
 // CUDA
 #include <cuda_runtime.h>
 
+// OpenGL & CUDA Interop for Zero-Copy rendering
+#include <glad/glad.h>
+#include <cuda_gl_interop.h>
+
 // Forward declarations
 struct LaunchParams;
+class OpenGLTexture;
 
 class OptixRenderer : public Renderer
 {
@@ -21,6 +26,11 @@ public:
     ~OptixRenderer() override;
 
     void Init(Film& film, const Scene& scene, const Camera& camera) override;
+    
+    // Zero-Copy rendering with OpenGL Interop
+    void ProgressiveRender(OpenGLTexture* targetTexture);
+    
+    // Legacy CPU path (for compatibility)
     void ProgressiveRender() override;
 
 private:
@@ -85,7 +95,12 @@ private:
     size_t m_NumMaterials = 0;
 
     // Output buffer
-    CUdeviceptr m_d_ColorBuffer = 0;
+    CUdeviceptr m_d_ColorBuffer = 0;   // Display buffer (tone-mapped)
+    CUdeviceptr m_d_AccumBuffer = 0;   // Accumulation buffer (linear, running sum)
+    
+    // OpenGL Interop for Zero-Copy rendering
+    GLuint m_PBO = 0;  // Pixel Buffer Object
+    cudaGraphicsResource* m_CudaGraphicsResource = nullptr;  // CUDA-registered GL resource
 
     // Launch parameters
     CUdeviceptr m_d_LaunchParams = 0;

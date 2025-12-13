@@ -23,9 +23,6 @@ struct CameraData
 
 struct LaunchParams
 {
-    // Output buffer (device pointer to float3 array)
-    float3* colorBuffer;
-    
     // Frame dimensions
     uint32_t width;
     uint32_t height;
@@ -38,6 +35,10 @@ struct LaunchParams
     
     // Scene traversable handle (GAS or IAS)
     OptixTraversableHandle traversable;
+    
+    // Output buffers
+    float3* colorBuffer;     // Display buffer (tone-mapped, for PBO)
+    float3* accumBuffer;     // Accumulation buffer (linear space, running sum)
     
     // Maximum ray recursion depth
     int maxDepth;
@@ -70,6 +71,11 @@ inline __host__ __device__ float3 operator*(float s, const float3& a)
 inline __host__ __device__ float3 operator*(const float3& a, const float3& b)
 {
     return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
+
+inline __host__ __device__ float3 operator/(const float3& a, float s)
+{
+    return make_float3(a.x / s, a.y / s, a.z / s);
 }
 
 inline __host__ __device__ float dot(const float3& a, const float3& b)
