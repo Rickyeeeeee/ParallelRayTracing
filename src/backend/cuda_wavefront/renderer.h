@@ -71,10 +71,7 @@ struct HitQueueSOA
 
 struct WavefrontQueues
 {
-    RayQueueSOA RayQueue{};
     HitQueueSOA HitQueue{};
-
-    QUAL_GPU inline void PushRay(uint32_t pixelIndex) const { RayQueue.Push(pixelIndex); }
 
     void ResetCounts(cudaStream_t stream = nullptr) const;
 };
@@ -99,6 +96,7 @@ public:
     WavefrontSceneBuffers m_SceneBuffers{};
 
     PixelStateSOA m_PixelState{};
+    RayQueueSOA m_RayQueues[2]{};
     WavefrontQueues m_Queues{};
 
     Camera* m_DeviceCamera = nullptr;
