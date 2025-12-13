@@ -433,8 +433,14 @@ int main() {
             else
                 film.UpdateDisplay();
             const auto t2 = std::chrono::high_resolution_clock::now();
-            frame->SetData(film.GetDisplayData());
-            openglRenderer.Draw(*frame);
+            if(selectedRenderer == 1) {
+                frame->SetDataGPU(film.GetDisplayDataGPU());
+                openglRenderer.Draw(*frame);
+            }
+            else {
+                frame->SetData(film.GetDisplayData());
+                openglRenderer.Draw(*frame);
+            }
             const auto t3 = std::chrono::high_resolution_clock::now();
 
             lastRenderMs = std::chrono::duration<double, std::milli>(t1 - t0).count();

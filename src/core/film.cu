@@ -116,7 +116,7 @@ void Film::UpdateDisplayGPU(float exposure, float gamma) {
     const float invGamma = 1.0f / gamma;
 
     updateDisplayKernel<<<(pixelCount * 4 + 255) / 256, 256>>>(d_Accum, d_Weights, d_Display, m_Width, m_Height, exposure, invGamma);
-    cudaMemcpy(m_Display.data(), d_Display, pixelCount * 4 * sizeof(uint8_t), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(m_Display.data(), d_Display, pixelCount * 4 * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 }
 
 void Film::UpdateDisplay(float exposure, float gamma)

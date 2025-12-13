@@ -35,6 +35,7 @@ public:
 
     // Pointer suitable for OpenGLTexture::SetData (RGBA8)
     const uint8_t* GetDisplayData() const { return m_Display.data(); }
+    const uint8_t* GetDisplayDataGPU() const { return d_Display; }
 
     uint32_t GetWidth() const  { return m_Width;  }
     uint32_t GetHeight() const { return m_Height; }

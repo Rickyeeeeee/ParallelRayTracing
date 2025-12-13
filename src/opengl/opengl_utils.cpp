@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <cuda_gl_interop.h>
+
 
 OpenGLTexture::OpenGLTexture(uint32_t width, uint32_t height)
     : m_Width(width), m_Height(height)
@@ -21,6 +23,13 @@ OpenGLTexture::OpenGLTexture(uint32_t width, uint32_t height)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    cudaGraphicsGLRegisterImage(
+        &m_CudaTexResource,
+        m_TextureID,
+        GL_TEXTURE_2D,
+        cudaGraphicsRegisterFlagsWriteDiscard
+    );
 }
 
 OpenGLTexture::~OpenGLTexture()
@@ -41,9 +50,23 @@ void OpenGLTexture::SetData(const void* data)
 
 void OpenGLTexture::SetDataGPU(const void* d_data)
 {
-    glBindTexture(GL_TEXTURE_2D, m_TextureID);
-    // TODO: find an API to upload data from GPU memory directly
-    glBindTexture(GL_TEXTURE_2D, 0);
+    if (!d_data || m_Width == 0 || m_Height == 0) return;
+
+    // Simplest correctness barrier (can be replaced with GL sync objects for better performance)
+    glFinish();
+
+    cudaGraphicsMapResources(1, &m_CudaTexResource, 0);
+
+    cudaArray_t dstArray = nullptr;
+    cudaGraphicsSubResourceGetMappedArray(&dstArray, m_CudaTexResource, 0, 0);
+
+    const size_t rowBytes = (size_t)m_Width * 4;
+    cudaMemcpy2DToArray(dstArray, 0, 0,
+                        d_data, rowBytes,
+                        rowBytes, m_Height,
+                        cudaMemcpyDeviceToDevice);
+
+    cudaGraphicsUnmapResources(1, &m_CudaTexResource, 0);
 }
 
 // Simple helper to read an entire text file into a std::string
