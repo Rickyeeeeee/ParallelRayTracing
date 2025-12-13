@@ -39,6 +39,7 @@ struct LaunchParams
     // Output buffers
     float3* colorBuffer;     // Display buffer (tone-mapped, for PBO)
     float3* accumBuffer;     // Accumulation buffer (linear space, running sum)
+    float*  sampleBuffer;    // Per-frame linear sample buffer (RGBRGB...)
     
     // Maximum ray recursion depth
     int maxDepth;
@@ -112,4 +113,3 @@ inline __host__ __device__ float lengthSquared(const float3& v)
 {
     return dot(v, v);
 }
-

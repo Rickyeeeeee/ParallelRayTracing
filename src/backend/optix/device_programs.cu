@@ -227,6 +227,14 @@ extern "C" __global__ void __raygen__renderFrame()
         rayDirection = payload.direction;
     }
     
+    // Write the raw linear sample for Film accumulation (RGB interleaved).
+    if (params.sampleBuffer)
+    {
+        const unsigned int base = pixelIndex * 3u;
+        params.sampleBuffer[base + 0] = finalColor.x;
+        params.sampleBuffer[base + 1] = finalColor.y;
+        params.sampleBuffer[base + 2] = finalColor.z;
+    }
 
     float3 accumColor = finalColor;
     

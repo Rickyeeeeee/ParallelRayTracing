@@ -427,12 +427,12 @@ int main() {
             const auto t0 = std::chrono::high_resolution_clock::now();
             activeRenderer->ProgressiveRender();
             const auto t1 = std::chrono::high_resolution_clock::now();
-            if(selectedRenderer == 1 || selectedRenderer == 2)
+            if(selectedRenderer != 0)
                 film.UpdateDisplayGPU();
             else
                 film.UpdateDisplay();
             const auto t2 = std::chrono::high_resolution_clock::now();
-            if(selectedRenderer == 1 || selectedRenderer == 2) {
+            if(selectedRenderer != 0) {
                 frame->SetDataGPU(film.GetDisplayDataGPU());
                 openglRenderer.Draw(*frame);
             }

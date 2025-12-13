@@ -20,6 +20,8 @@
 #include <glm/gtc/type_ptr.hpp>  // For glm::value_ptr>
 #include <stdexcept>
 #include <algorithm>
+#include <unordered_map>
+#include <type_traits>
 
 // Core includes
 #include <core/scene.h>
@@ -159,6 +161,7 @@ void OptixRenderer::cleanup()
     // Free device buffers
     if (m_d_ColorBuffer)   cudaFree(reinterpret_cast<void*>(m_d_ColorBuffer));
     if (m_d_AccumBuffer)   cudaFree(reinterpret_cast<void*>(m_d_AccumBuffer));
+    if (m_d_SampleBuffer)  cudaFree(reinterpret_cast<void*>(m_d_SampleBuffer));
     if (m_d_LaunchParams)  cudaFree(reinterpret_cast<void*>(m_d_LaunchParams));
     if (m_d_SphereData)    cudaFree(reinterpret_cast<void*>(m_d_SphereData));
     if (m_d_QuadData)      cudaFree(reinterpret_cast<void*>(m_d_QuadData));
@@ -438,52 +441,77 @@ void OptixRenderer::buildSBT()
 }
 
 // Helper: Convert CPU Material to GPU DeviceMaterial
-static DeviceMaterial ConvertMaterial(const Material* cpuMat)
+static DeviceMaterial ConvertMaterial(const MaterialHandle& handle)
 {
     DeviceMaterial dMat = {};
     dMat.albedo = make_float3(0.8f, 0.8f, 0.8f); // Default值
     dMat.type = MaterialType::Lambertian;
     
-    if (!cpuMat) return dMat;
+    if (!handle.IsValid())
+        return dMat;
     
     // 判斷材質類型並複製數值
-    if (auto m = dynamic_cast<const LambertianMaterial*>(cpuMat)) {
-        dMat.type = MaterialType::Lambertian;
-        auto albedo = m->GetAlbedo();
-        dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
-    }
-    else if (auto m = dynamic_cast<const MetalMaterial*>(cpuMat)) {
-        dMat.type = MaterialType::Metal;
-        auto albedo = m->GetAlbedo();
-        dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
-        dMat.roughness = m->GetRoughness();
-    }
-    else if (auto m = dynamic_cast<const DielectricMaterial*>(cpuMat)) {
-        dMat.type = MaterialType::Dielectric;
-        dMat.albedo = make_float3(1.0f, 1.0f, 1.0f);
-        dMat.refractionIndex = m->GetRefractionIndex();
-        //if (dMat.refractionIndex < 1.0f) dMat.refractionIndex = 1.5f;
-    }
-    else if (auto m = dynamic_cast<const EmissiveMaterial*>(cpuMat)) {
-        dMat.type = MaterialType::Emissive;
-        auto emit = m->GetEmission();
-        dMat.emission = make_float3(emit.x, emit.y, emit.z);
-    }
+    handle.dispatch([&](const auto* material) {
+        if (!material)
+            return;
+        using MatT = std::remove_cv_t<std::remove_reference_t<decltype(*material)>>;
+        if constexpr (std::is_same_v<MatT, LambertianMaterial>)
+        {
+            dMat.type = MaterialType::Lambertian;
+            const glm::vec3 albedo = material->GetAlbedo();
+            dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
+        }
+        else if constexpr (std::is_same_v<MatT, MetalMaterial>)
+        {
+            dMat.type = MaterialType::Metal;
+            const glm::vec3 albedo = material->GetAlbedo();
+            dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
+            dMat.roughness = material->GetRoughness();
+        }
+        else if constexpr (std::is_same_v<MatT, DielectricMaterial>)
+        {
+            dMat.type = MaterialType::Dielectric;
+            dMat.albedo = make_float3(1.0f, 1.0f, 1.0f);
+            dMat.refractionIndex = material->GetRefractionIndex();
+        }
+        else if constexpr (std::is_same_v<MatT, EmissiveMaterial>)
+        {
+            dMat.type = MaterialType::Emissive;
+            const glm::vec3 emit = material->GetEmission();
+            dMat.emission = make_float3(emit.x, emit.y, emit.z);
+        }
+    });
     
     return dMat;
 }
 
 void OptixRenderer::uploadSceneData(std::vector<SphereData>& outputSpheres, std::vector<QuadData>& outputQuads)
 {
-    std::vector<SphereData> spheres;
-    std::vector<QuadData> quads;
-    std::vector<DeviceMaterial> materials;
+#if 0
+    outputSpheres.clear();
+    outputQuads.clear();
 
-    if (!m_Scene) return;
+    std::vector<DeviceMaterial> materials;
+    std::unordered_map<const void*, int> materialIndex;
+
+    if (!m_Scene)
+        return;
+
+    auto release = [](auto*& ptr) {
+        if (ptr)
+        {
+            cudaFree(ptr);
+            ptr = nullptr;
+        }
+    };
+
+    release(m_d_SphereData);
+    release(m_d_QuadData);
+    release(m_d_TriangleData);
+    release(m_d_Materials);
 
     // 讀取 main.cpp 傳進來的場景
-    const auto& primitiveList = m_Scene->GetPrimitives();
-    const auto& primitives = primitiveList.GetList();
+    const auto& primitives = m_Scene->GetPrimitives();
 
     for (const auto& prim : primitives)
     {
@@ -559,6 +587,116 @@ void OptixRenderer::uploadSceneData(std::vector<SphereData>& outputSpheres, std:
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_d_Materials), materials.data(), size, cudaMemcpyHostToDevice));
     }
     
+    std::cout << "[OptixRenderer] Scene: " << m_NumSpheres << " spheres, " << m_NumQuads << " quads\n";
+#endif
+    outputSpheres.clear();
+    outputQuads.clear();
+
+    std::vector<DeviceMaterial> materials;
+    std::unordered_map<const void*, int> materialIndex;
+
+    if (!m_Scene)
+        return;
+
+    auto release = [](auto*& ptr) {
+        if (ptr)
+        {
+            cudaFree(ptr);
+            ptr = nullptr;
+        }
+    };
+
+    release(m_d_SphereData);
+    release(m_d_QuadData);
+    release(m_d_TriangleData);
+    release(m_d_Materials);
+
+    const auto getMaterialIndex = [&](const MaterialHandle& handle) -> int {
+        if (!handle.IsValid())
+            return -1;
+        auto it = materialIndex.find(handle.Ptr);
+        if (it != materialIndex.end())
+            return it->second;
+        const int idx = static_cast<int>(materials.size());
+        materials.push_back(ConvertMaterial(handle));
+        materialIndex.emplace(handle.Ptr, idx);
+        return idx;
+    };
+
+    const auto& primitives = m_Scene->GetPrimitives();
+    outputSpheres.reserve(primitives.size());
+    outputQuads.reserve(primitives.size());
+
+    for (const auto& prim : primitives)
+    {
+        const int matIndex = getMaterialIndex(prim.Material);
+        const glm::mat4 mat = prim.Transform.GetMat();
+        const glm::vec3 position = glm::vec3(mat[3]);
+        const float scale = glm::length(glm::vec3(mat[0]));
+
+        prim.Shape.dispatch([&](const auto* shape) {
+            if (!shape)
+                return;
+            using ShapeT = std::remove_cv_t<std::remove_reference_t<decltype(*shape)>>;
+            if constexpr (std::is_same_v<ShapeT, Circle>)
+            {
+                SphereData sData{};
+                sData.center = make_float3(position.x, position.y, position.z);
+                sData.radius = shape->getRadius() * scale;
+                sData.materialIndex = matIndex;
+                outputSpheres.push_back(sData);
+            }
+            else if constexpr (std::is_same_v<ShapeT, Quad>)
+            {
+                QuadData qData{};
+
+                const float w = shape->GetWidth();
+                const float h = shape->GetHeight();
+
+                const glm::vec4 localCorner(-w / 2.0f, 0.0f, -h / 2.0f, 1.0f);
+                const glm::vec4 localU(w, 0.0f, 0.0f, 0.0f);
+                const glm::vec4 localV(0.0f, 0.0f, h, 0.0f);
+
+                const glm::vec3 worldCorner = glm::vec3(mat * localCorner);
+                const glm::vec3 worldU = glm::vec3(mat * localU);
+                const glm::vec3 worldV = glm::vec3(mat * localV);
+
+                qData.corner = make_float3(worldCorner.x, worldCorner.y, worldCorner.z);
+                qData.u = make_float3(worldU.x, worldU.y, worldU.z);
+                qData.v = make_float3(worldV.x, worldV.y, worldV.z);
+                qData.normal = normalize(cross(qData.u, qData.v));
+                qData.materialIndex = matIndex;
+
+                outputQuads.push_back(qData);
+            }
+        });
+    }
+
+    m_NumSpheres = outputSpheres.size();
+    m_NumQuads = outputQuads.size();
+    m_NumMaterials = materials.size();
+
+    if (!outputSpheres.empty())
+    {
+        const size_t bytes = sizeof(SphereData) * outputSpheres.size();
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_SphereData), bytes));
+        CUDA_CHECK(cudaMemcpy(m_d_SphereData, outputSpheres.data(), bytes, cudaMemcpyHostToDevice));
+    }
+
+    if (!outputQuads.empty())
+    {
+        const size_t bytes = sizeof(QuadData) * outputQuads.size();
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_QuadData), bytes));
+        CUDA_CHECK(cudaMemcpy(m_d_QuadData, outputQuads.data(), bytes, cudaMemcpyHostToDevice));
+    }
+
+    if (!materials.empty())
+    {
+        const size_t bytes = sizeof(DeviceMaterial) * materials.size();
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_Materials), bytes));
+        CUDA_CHECK(cudaMemcpy(m_d_Materials, materials.data(), bytes, cudaMemcpyHostToDevice));
+    }
+
     std::cout << "[OptixRenderer] Scene: " << m_NumSpheres << " spheres, " << m_NumQuads << " quads\n";
 }
 
@@ -795,14 +933,18 @@ void OptixRenderer::updateLaunchParams()
     launchParams.skyLight = make_float3(SKY_R, SKY_G, SKY_B);
     launchParams.colorBuffer = reinterpret_cast<float3*>(m_d_ColorBuffer);
     launchParams.accumBuffer = reinterpret_cast<float3*>(m_d_AccumBuffer);
+    launchParams.sampleBuffer = m_d_SampleBuffer;
     
     CUDA_CHECK(cudaMemcpy(
-        reinterpret_cast<void*>(m_d_LaunchParams),
+        m_d_LaunchParams,
         &launchParams, sizeof(LaunchParams), cudaMemcpyHostToDevice));
 }
 
 void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
 {
+    if (m_Initialized)
+        cleanup();
+
     m_Film = &film;
     m_Scene = &scene;
     m_Camera = &camera;
@@ -829,6 +971,7 @@ void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
         size_t bufferSize = sizeof(float3) * film.GetWidth() * film.GetHeight();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_ColorBuffer), bufferSize));
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_AccumBuffer), bufferSize));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_SampleBuffer), sizeof(float) * 3ull * film.GetWidth() * film.GetHeight()));
         
         CUDA_CHECK(cudaMemset(reinterpret_cast<void*>(m_d_AccumBuffer), 0, bufferSize));
         
@@ -874,30 +1017,14 @@ void OptixRenderer::ProgressiveRender()
     OPTIX_CHECK(optixLaunch(
         m_Pipeline,
         m_Stream,
-        m_d_LaunchParams,
+        reinterpret_cast<CUdeviceptr>(m_d_LaunchParams),
         sizeof(LaunchParams),
         &m_SBT,
         width, height, 1));
     
     CUDA_CHECK(cudaStreamSynchronize(m_Stream));
-    
-    // Copy results back
-    std::vector<float3> colorBuffer(width * height);
-    CUDA_CHECK(cudaMemcpy(
-        colorBuffer.data(),
-        reinterpret_cast<void*>(m_d_ColorBuffer),
-        sizeof(float3) * width * height,
-        cudaMemcpyDeviceToHost));
-    
-    // Convert to RGB
-    std::vector<float> rgb(width * height * 3);
-    for (size_t i = 0; i < colorBuffer.size(); ++i) {
-        rgb[i * 3 + 0] = colorBuffer[i].x;
-        rgb[i * 3 + 1] = colorBuffer[i].y;
-        rgb[i * 3 + 2] = colorBuffer[i].z;
-    }
-    
-    m_Film->AddSampleBuffer(rgb.data());
+
+    m_Film->AddSampleBufferGPU(m_d_SampleBuffer);
     m_FrameIndex++;
 }
 
@@ -917,7 +1044,7 @@ void OptixRenderer::ProgressiveRender(OpenGLTexture* targetTexture)
     OPTIX_CHECK(optixLaunch(
         m_Pipeline,
         m_Stream,
-        m_d_LaunchParams,
+        reinterpret_cast<CUdeviceptr>(m_d_LaunchParams),
         sizeof(LaunchParams),
         &m_SBT,
         width, height, 1));
@@ -947,6 +1074,8 @@ void OptixRenderer::ProgressiveRender(OpenGLTexture* targetTexture)
         
         // 4. Synchronize to ensure copy is complete
         CUDA_CHECK(cudaStreamSynchronize(m_Stream));
+
+        m_Film->AddSampleBufferGPU(m_d_SampleBuffer);
         
         // 5. Update OpenGL texture from PBO
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_PBO);
@@ -960,24 +1089,8 @@ void OptixRenderer::ProgressiveRender(OpenGLTexture* targetTexture)
     }
     else
     {
-        // Fallback to slow CPU path if no texture provided
         CUDA_CHECK(cudaStreamSynchronize(m_Stream));
-        
-        std::vector<float3> colorBuffer(width * height);
-        CUDA_CHECK(cudaMemcpy(
-            colorBuffer.data(),
-            reinterpret_cast<void*>(m_d_ColorBuffer),
-            sizeof(float3) * width * height,
-            cudaMemcpyDeviceToHost));
-        
-        std::vector<float> rgb(width * height * 3);
-        for (size_t i = 0; i < colorBuffer.size(); ++i) {
-            rgb[i * 3 + 0] = colorBuffer[i].x;
-            rgb[i * 3 + 1] = colorBuffer[i].y;
-            rgb[i * 3 + 2] = colorBuffer[i].z;
-        }
-        
-        m_Film->AddSampleBuffer(rgb.data());
+        m_Film->AddSampleBufferGPU(m_d_SampleBuffer);
     }
     
     m_FrameIndex++;

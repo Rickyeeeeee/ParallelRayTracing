@@ -19,6 +19,8 @@
 struct LaunchParams;
 struct SphereData;
 struct QuadData;
+struct TriangleData;
+struct DeviceMaterial;
 class OpenGLTexture;
 
 class OptixRenderer : public Renderer
@@ -87,25 +89,26 @@ private:
     CUdeviceptr m_QuadGasBuffer = 0;
 
     // Scene data on device
-    CUdeviceptr m_d_SphereData = 0;
-    CUdeviceptr m_d_QuadData = 0;
-    CUdeviceptr m_d_TriangleData = 0;
-    CUdeviceptr m_d_Materials = 0;
+    SphereData* m_d_SphereData = nullptr;
+    QuadData* m_d_QuadData = nullptr;
+    TriangleData* m_d_TriangleData = nullptr;
+    DeviceMaterial* m_d_Materials = nullptr;
     size_t m_NumSpheres = 0;
     size_t m_NumQuads = 0;
     size_t m_NumTriangles = 0;
     size_t m_NumMaterials = 0;
 
     // Output buffer
-    CUdeviceptr m_d_ColorBuffer = 0;   // Display buffer (tone-mapped)
-    CUdeviceptr m_d_AccumBuffer = 0;   // Accumulation buffer (linear, running sum)
+    float3* m_d_ColorBuffer = nullptr;   // Display buffer (tone-mapped)
+    float3* m_d_AccumBuffer = nullptr;   // Accumulation buffer (linear, running sum)
+    float* m_d_SampleBuffer = nullptr;   // Per-frame linear sample buffer (RGBRGB...)
     
     // OpenGL Interop for Zero-Copy rendering
     GLuint m_PBO = 0;  // Pixel Buffer Object
     cudaGraphicsResource* m_CudaGraphicsResource = nullptr;  // CUDA-registered GL resource
 
     // Launch parameters
-    CUdeviceptr m_d_LaunchParams = 0;
+    LaunchParams* m_d_LaunchParams = nullptr;
 
     // Rendering state
     uint32_t m_FrameIndex = 0;
