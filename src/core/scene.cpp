@@ -46,7 +46,9 @@ Scene::Scene(ScenePreset preset)
     case ScenePreset::LIGHT_TEST:    InitLightTest();    break;
     case ScenePreset::MATERIAL_TEST: InitMaterialTest(); break;
     case ScenePreset::CORNELL:       InitCornell();      break;
-    case ScenePreset::RANDOM_BALLS:  InitRandomBalls();  break;
+    case ScenePreset::RANDOM_BALLS_SMALL:  InitRandomBallsSmall();  break;
+    case ScenePreset::RANDOM_BALLS_MEDIUM: InitRandomBallsMedium(); break;
+    case ScenePreset::RANDOM_BALLS_LARGE:  InitRandomBallsLarge();  break;
     case ScenePreset::DEFAULT:
     default:                         InitDefault();      break;
     }
@@ -57,7 +59,7 @@ Scene::Scene(ScenePreset preset)
 // Scene variants
 // ------------------------------------------------------------
 
-void Scene::InitRandomBalls()
+void Scene::InitRandomBalls(int ballCount)
 {
     // Strong test for BVH & traversal
     m_SkyLightIntensity = 1.0;
@@ -84,14 +86,12 @@ void Scene::InitRandomBalls()
     std::mt19937 rng(1337);
     std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
     std::uniform_real_distribution<float> distPos(-40.0f, 40.0f);
-    std::uniform_real_distribution<float> distRadius(0.2f, 0.6f);
-
-    constexpr int BALL_COUNT = 800;   // crank this to 2k–10k if you want pain
+    std::uniform_real_distribution<float> distRadius(0.2f, 1.0f);
 
     // -----------------------------
     // Balls
     // -----------------------------
-    for (int i = 0; i < BALL_COUNT; ++i)
+    for (int i = 0; i < ballCount; ++i)
     {
         float radius = distRadius(rng);
         glm::vec3 pos(
@@ -167,6 +167,21 @@ void Scene::InitRandomBalls()
             ShapeType::CIRCLE
         );
     }
+}
+
+void Scene::InitRandomBallsSmall()
+{
+    InitRandomBalls(100);
+}
+
+void Scene::InitRandomBallsMedium()
+{
+    InitRandomBalls(400);
+}
+
+void Scene::InitRandomBallsLarge()
+{
+    InitRandomBalls(800);
 }
 
 

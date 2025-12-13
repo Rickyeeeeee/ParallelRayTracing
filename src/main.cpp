@@ -224,7 +224,7 @@ int main() {
         g_MouseScrollDelta = 0.0;
         if (allowCameraInput && scrollDelta != 0.0)
         {
-            float speed = 0.7f; // Adjust zoom speed as needed
+            float speed = 20.0f; // Adjust zoom speed as needed
             camera.Zoom(static_cast<float>(scrollDelta) * speed);
             cameraUpdated = true;
         }
@@ -233,7 +233,7 @@ int main() {
         const bool rightMousedragging = allowCameraInput && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
         if (leftMousedragging)
         {
-            float speed = 150.0f; // Adjust speed as needed
+            float speed = 500.0f; // Adjust speed as needed
             camera.Rotate(
                 static_cast<float>(-cursorDeltaY) * speed / windowWidth, 
                 static_cast<float>(-cursorDeltaX) * speed / windowHeight);
@@ -242,7 +242,7 @@ int main() {
 
         if (rightMousedragging)
         {
-            float speed = 10.0f; // Adjust speed as needed
+            float speed = 50.0f; // Adjust speed as needed
             camera.Translate(
                 static_cast<float>(-cursorDeltaX) * speed / windowWidth, 
                 static_cast<float>(cursorDeltaY) * speed / windowHeight);

@@ -9,13 +9,15 @@ enum class ScenePreset
     LIGHT_TEST,
     MATERIAL_TEST,
     CORNELL,
-    RANDOM_BALLS
+    RANDOM_BALLS_SMALL,
+    RANDOM_BALLS_MEDIUM,
+    RANDOM_BALLS_LARGE
 };
 
 class Scene
 {
 public:
-    explicit Scene(ScenePreset preset = ScenePreset::CORNELL);
+    explicit Scene(ScenePreset preset = ScenePreset::RANDOM_BALLS_LARGE);
 
     void Intersect(const Ray& ray, SurfaceInteraction* intersect) const
     {
@@ -47,7 +49,10 @@ private:
     void InitLightTest();
     void InitMaterialTest();
     void InitCornell();
-    void InitRandomBalls();
+    void InitRandomBalls(int ballCount);
+    void InitRandomBallsSmall();
+    void InitRandomBallsMedium();
+    void InitRandomBallsLarge();
 
 private:
     MaterialPool  m_Materials;
