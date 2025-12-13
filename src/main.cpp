@@ -422,7 +422,6 @@ int main() {
             activeRenderer = rendererOptions[clampedIndex].Instance.get();
             selectedRenderer = clampedIndex;
         }
-
         if (activeRenderer)
         {
             const auto t0 = std::chrono::high_resolution_clock::now();

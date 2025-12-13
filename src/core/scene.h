@@ -17,6 +17,7 @@ public:
 
     const std::vector<Primitive>& GetPrimitives() const { return m_Primitives.GetPrimitives(); }
 
+
 private:
     MaterialPool m_Materials;
     ShapePool m_Shapes;

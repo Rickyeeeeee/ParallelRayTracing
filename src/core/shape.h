@@ -40,6 +40,9 @@ public:
     float GetHeight() const { return m_Height; }
     glm::vec3 GetNormal() const { return m_Normal; }
 
+    float GetWidth() const { return m_Width; }
+    float GetHeight() const { return m_Height; }
+
 private:
     float m_Width;
     float m_Height;
