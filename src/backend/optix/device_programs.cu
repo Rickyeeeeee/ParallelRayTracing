@@ -101,6 +101,7 @@ static __forceinline__ __device__ void ApplyMaterial(
             
             payload->color = make_float3(0.0f, 0.0f, 0.0f);
             payload->attenuation = mat.albedo;
+            // CPU REPLICA: No origin offset, relies on tMin = 0.001f
             payload->origin = hitPoint;
             payload->direction = scatterDir;
             break;
@@ -115,6 +116,7 @@ static __forceinline__ __device__ void ApplyMaterial(
             {
                 payload->color = make_float3(0.0f, 0.0f, 0.0f);
                 payload->attenuation = mat.albedo;
+                // CPU REPLICA: No origin offset
                 payload->origin = hitPoint;
                 payload->direction = reflected;
             }
@@ -138,17 +140,20 @@ static __forceinline__ __device__ void ApplyMaterial(
             
             if (cannotRefract || schlickReflectance(cosTheta, ri) > randomFloat(payload->seed))
             {
+                // Reflection
                 direction = reflect(unitDir, faceNormal);
             }
             else
             {
+                // Refraction
                 direction = refract(unitDir, faceNormal, ri);
             }
             
+            // CPU REPLICA: No origin offset, relies on tMin
+            payload->origin = hitPoint;
+            
             payload->color = make_float3(0.0f, 0.0f, 0.0f);
             payload->attenuation = make_float3(1.0f, 1.0f, 1.0f);
-            // Offset hitPoint along the ray direction to avoid self-intersection
-            payload->origin = hitPoint + 0.001f * direction;
             payload->direction = direction;
             break;
         }
@@ -240,6 +245,9 @@ extern "C" __global__ void __raygen__renderFrame()
 extern "C" __global__ void __miss__radiance()
 {
     RadiancePayload* payload = getPayload();
+    
+    // Simple fixed color background (no gradient)
+    // Color is set in updateLaunchParams on host side
     payload->color = params.skyLight;
     payload->done = true;
 }

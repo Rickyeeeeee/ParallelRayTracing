@@ -494,6 +494,7 @@ void OptixRenderer::uploadSceneData()
     {
         DeviceMaterial mat;
         mat.type = MaterialType::Emissive;
+        // Match CPU scene.h quad1: EmissiveMaterial(glm::vec3{ 3.0f, 4.0f, 2.0f })
         mat.emission = make_float3(3.0f, 4.0f, 2.0f);
         materials.push_back(mat);
         
@@ -765,7 +766,11 @@ void OptixRenderer::updateLaunchParams()
     launchParams.frameIndex = m_FrameIndex;
     launchParams.traversable = m_TraversableHandle;
     launchParams.maxDepth = m_MaxDepth;
-    launchParams.skyLight = make_float3(m_SkyLight, m_SkyLight, m_SkyLight);
+    
+    // EXACT CPU REPLICA: Use exact color from CPU renderer.h line 29
+    // glm::vec3 m_SkyLight{ 0.4f, 0.3f, 0.6f };
+    // No gradient, no intensity multiplier - direct copy
+    launchParams.skyLight = make_float3(0.4f, 0.3f, 0.6f);
     launchParams.colorBuffer = reinterpret_cast<float3*>(m_d_ColorBuffer);
     
     CUDA_CHECK(cudaMemcpy(

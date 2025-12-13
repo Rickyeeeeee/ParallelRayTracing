@@ -1,7 +1,9 @@
 #pragma once
 
+#include <vector>  // For std::vector<MeshGAS>
 #include <core/core.h>
 #include <core/renderer.h>
+#include <core/scene.h>
 
 // OptiX
 #include <optix.h>
@@ -91,20 +93,6 @@ private:
     // Rendering state
     uint32_t m_FrameIndex = 0;
     bool m_Initialized = false;
-    
-    // Mesh GAS management for dynamic scene
-    struct MeshGAS {
-        CUdeviceptr buffer = 0;
-        OptixTraversableHandle handle = 0;
-        CUdeviceptr vertexBuffer = 0;
-        CUdeviceptr indexBuffer = 0;
-    };
-    std::vector<MeshGAS> m_MeshGASs;
-    
-    // Helper functions for dynamic scene loading
-    void buildUnitSphereGAS();
-    void buildUnitQuadGAS();
-    int processMaterial(const Material* cpuMat, std::vector<DeviceMaterial>& gpuMaterials);
     
     // Settings
     int m_MaxDepth = 10;
