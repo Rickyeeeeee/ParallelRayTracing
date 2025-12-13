@@ -17,17 +17,8 @@ QUAL_GPU inline PixelState PixelStateSOA::Load(uint32_t index) const
     state.Ray.Direction = RayDirections[index];
     state.Throughput = Throughput[index];
     state.Radiance = Radiance[index];
-    state.PendingEmission = PendingEmission[index];
-    state.HitPosition = HitPositions[index];
-    state.HitNormal = HitNormals[index];
-    state.PixelIndex = PixelIndices[index];
     state.PathDepth = PathDepth[index];
-    state.RNGSeed = RNGSeed[index];
-    state.HitDistance = HitDistance[index];
-    state.Material = Materials[index];
     state.Alive = Alive[index];
-    state.HasHit = HasHit[index];
-    state.IsFrontFace = IsFrontFace ? IsFrontFace[index] : 1;
     return state;
 }
 
@@ -37,18 +28,8 @@ QUAL_GPU inline void PixelStateSOA::Store(uint32_t index, const PixelState& stat
     RayDirections[index] = state.Ray.Direction;
     Throughput[index] = state.Throughput;
     Radiance[index] = state.Radiance;
-    PendingEmission[index] = state.PendingEmission;
-    HitPositions[index] = state.HitPosition;
-    HitNormals[index] = state.HitNormal;
-    PixelIndices[index] = state.PixelIndex;
     PathDepth[index] = state.PathDepth;
-    RNGSeed[index] = state.RNGSeed;
-    HitDistance[index] = state.HitDistance;
-    Materials[index] = state.Material;
     Alive[index] = state.Alive;
-    HasHit[index] = state.HasHit;
-    if (IsFrontFace)
-        IsFrontFace[index] = state.IsFrontFace;
 }
 
 QUAL_GPU inline Ray PixelStateSOA::GetRay(uint32_t index) const
@@ -63,7 +44,26 @@ QUAL_GPU inline uint32_t RayQueueSOA::AllocateSlot() const
 {
     if (!IsValid())
         return 0xFFFFFFFFu;
+
+#if defined(__CUDA_ARCH__)
+    // Warp-aggregated allocation: 1 atomicAdd per warp.
+    const unsigned int mask = __activemask();
+    const int lane = static_cast<int>(threadIdx.x) & 31;
+    const int leader = __ffs(mask) - 1;
+    const uint32_t warpCount = static_cast<uint32_t>(__popc(mask));
+
+    uint32_t warpBase = 0;
+    if (lane == leader)
+        warpBase = atomicAdd(Count, warpCount);
+
+    warpBase = __shfl_sync(mask, warpBase, leader);
+
+    const unsigned int laneMask = (lane == 0) ? 0u : ((1u << lane) - 1u);
+    const uint32_t laneRank = static_cast<uint32_t>(__popc(mask & laneMask));
+    return warpBase + laneRank;
+#else
     return atomicAdd(Count, 1u);
+#endif
 }
 
 QUAL_GPU inline void RayQueueSOA::Push(uint32_t pixelIndex) const
@@ -74,24 +74,63 @@ QUAL_GPU inline void RayQueueSOA::Push(uint32_t pixelIndex) const
     PixelIndices[writeIdx] = pixelIndex;
 }
 
+QUAL_GPU inline uint32_t HitQueueSOA::AllocateSlot() const
+{
+    if (!IsValid())
+        return 0xFFFFFFFFu;
+
+#if defined(__CUDA_ARCH__)
+    const unsigned int mask = __activemask();
+    const int lane = static_cast<int>(threadIdx.x) & 31;
+    const int leader = __ffs(mask) - 1;
+    const uint32_t warpCount = static_cast<uint32_t>(__popc(mask));
+
+    uint32_t warpBase = 0;
+    if (lane == leader)
+        warpBase = atomicAdd(Count, warpCount);
+
+    warpBase = __shfl_sync(mask, warpBase, leader);
+
+    const unsigned int laneMask = (lane == 0) ? 0u : ((1u << lane) - 1u);
+    const uint32_t laneRank = static_cast<uint32_t>(__popc(mask & laneMask));
+    return warpBase + laneRank;
+#else
+    return atomicAdd(Count, 1u);
+#endif
+}
+
+QUAL_GPU inline void HitQueueSOA::Push(uint32_t pixelIndex,
+                                      const glm::vec3& hitPosition,
+                                      const glm::vec3& hitNormal,
+                                      const MaterialHandle& material,
+                                      bool isFrontFace) const
+{
+    const uint32_t writeIdx = AllocateSlot();
+    if (writeIdx >= Capacity)
+        return;
+
+    PixelIndices[writeIdx] = pixelIndex;
+    HitPositions[writeIdx] = hitPosition;
+    HitNormals[writeIdx] = hitNormal;
+    Materials[writeIdx] = material;
+    IsFrontFace[writeIdx] = isFrontFace ? 1 : 0;
+}
+
 void WavefrontQueues::ResetCounts(cudaStream_t stream) const
 {
-    auto zeroCount = [&](const RayQueueSOA& queue) {
+    auto zeroCount = [&](const auto& queue) {
         if (queue.Count)
-        {
             cudaMemsetAsync(queue.Count, 0, sizeof(uint32_t), stream);
-        }
     };
     
-    zeroCount(RayQueue);
-    zeroCount(EscapeQueue);
     zeroCount(HitQueue);
 }
 
 namespace
 {
 
-QUAL_GPU inline uint32_t QueueCount(const RayQueueSOA& queue)
+template<typename QueueT>
+QUAL_GPU inline uint32_t QueueCount(const QueueT& queue)
 {
     if (!queue.Count || queue.Capacity == 0)
         return 0;
@@ -118,19 +157,10 @@ QUAL_GPU bool IntersectPrimitiveDevice(const Primitive& primitive, const Ray& wo
 
 QUAL_GPU inline void ResetPixelState(PixelStateSOA state, uint32_t pixelIndex)
 {
-    state.PixelIndices[pixelIndex] = pixelIndex;
     state.PathDepth[pixelIndex] = 0;
     state.Throughput[pixelIndex] = glm::vec3(1.0f);
     state.Radiance[pixelIndex] = glm::vec3(0.0f);
-    state.PendingEmission[pixelIndex] = glm::vec3(0.0f);
-    state.HitPositions[pixelIndex] = glm::vec3(0.0f);
-    state.HitNormals[pixelIndex] = glm::vec3(0.0f);
-    state.Materials[pixelIndex] = MaterialHandle{};
     state.Alive[pixelIndex] = 1;
-    state.HitDistance[pixelIndex] = 0.0f;
-    state.HasHit[pixelIndex] = 0;
-    if (state.IsFrontFace)
-        state.IsFrontFace[pixelIndex] = 1;
 }
 
 __global__ void InitRNGStatesKernel(PixelStateSOA pixelStates, uint32_t pixelCount, uint64_t seed)
@@ -143,11 +173,17 @@ __global__ void InitRNGStatesKernel(PixelStateSOA pixelStates, uint32_t pixelCou
         return;
 
     curand_init(seed, idx, 0, &pixelStates.RNGStates[idx]);
-    if (pixelStates.RNGSeed)
-        pixelStates.RNGSeed[idx] = static_cast<uint32_t>(seed ^ (0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(idx) * 0xBF58476D1CE4E5B9ULL));
 }
 
-__global__ void GenerateCameraRaysKernel(PixelStateSOA pixelStates, WavefrontQueues queues, const Camera* cam, uint32_t width, uint32_t height)
+__global__ void ResetCountKernel(uint32_t* counter)
+{
+    if (!counter)
+        return;
+    if (blockIdx.x == 0 && threadIdx.x == 0)
+        *counter = 0u;
+}
+
+__global__ void GenerateCameraRaysKernel(PixelStateSOA pixelStates, RayQueueSOA rayQueue, const Camera* cam, uint32_t width, uint32_t height)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t pixelCount = width * height;
@@ -164,35 +200,38 @@ __global__ void GenerateCameraRaysKernel(PixelStateSOA pixelStates, WavefrontQue
     pixelStates.RayOrigins[idx] = ray.Origin;
     pixelStates.RayDirections[idx] = ray.Direction;
 
-    queues.PushRay(idx);
+    rayQueue.Push(idx);
 }
 
-__global__ void IntersectClosestKernel(PixelStateSOA pixelStates, WavefrontQueues queues, WavefrontDeviceSceneView scene)
+__global__ void IntersectClosestKernel(PixelStateSOA pixelStates, RayQueueSOA rayQueue, HitQueueSOA hitQueue, WavefrontDeviceSceneView scene, glm::vec3 skyColor)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint32_t rayQueueCount = QueueCount(queues.RayQueue);
+    __shared__ uint32_t rayQueueCount;
+    if (threadIdx.x == 0)
+        rayQueueCount = QueueCount(rayQueue);
+    __syncthreads();
     if (idx >= rayQueueCount)
         return;
 
-    if (!queues.RayQueue.PixelIndices || !queues.HitQueue.PixelIndices || !queues.EscapeQueue.PixelIndices || !pixelStates.RNGStates)
+    if (!rayQueue.PixelIndices || !hitQueue.IsValid())
         return;
     if (!scene.primitives || scene.primitiveCount <= 0)
     {
-        const uint32_t pixelIndex = queues.RayQueue.PixelIndices[idx];
-        pixelStates.HasHit[pixelIndex] = 0;
-        queues.PushEscape(pixelIndex);
+        const uint32_t pixelIndex = rayQueue.PixelIndices[idx];
+        pixelStates.Radiance[pixelIndex] += pixelStates.Throughput[pixelIndex] * skyColor;
+        pixelStates.Alive[pixelIndex] = 0;
         return;
     }
 
-    const uint32_t pixelIndex = queues.RayQueue.PixelIndices[idx];
+    const uint32_t pixelIndex = rayQueue.PixelIndices[idx];
     const glm::vec3 rayOrigin = pixelStates.RayOrigins[pixelIndex];
-    const glm::vec3 rayDirection = glm::normalize(pixelStates.RayDirections[pixelIndex]);
+    const glm::vec3 rayDirection = pixelStates.RayDirections[pixelIndex];
 
     float closestT = FLT_MAX;
     glm::vec3 bestNormal(0.0f);
     glm::vec3 bestPosition(0.0f);
     MaterialHandle bestMaterial{};
-    uint8_t bestFrontFace = 1;
+    bool bestFrontFace = true;
     bool hitSomething = false;
 
     const Primitive* primitives = scene.primitives;
@@ -216,48 +255,42 @@ __global__ void IntersectClosestKernel(PixelStateSOA pixelStates, WavefrontQueue
             bestNormal = glm::normalize(si.Normal);
             bestPosition = si.Position;
             bestMaterial = si.Material;
-            bestFrontFace = si.IsFrontFace ? 1 : 0;
+            bestFrontFace = si.IsFrontFace;
             hitSomething = true;
         }
     }
 
     if (hitSomething)
     {
-        pixelStates.HitPositions[pixelIndex] = bestPosition;
-        pixelStates.HitNormals[pixelIndex] = bestNormal;
-        pixelStates.HitDistance[pixelIndex] = closestT;
-        pixelStates.Materials[pixelIndex] = bestMaterial;
-        pixelStates.HasHit[pixelIndex] = 1;
-        if (pixelStates.IsFrontFace)
-            pixelStates.IsFrontFace[pixelIndex] = bestFrontFace;
-        queues.PushHit(pixelIndex);
+        hitQueue.Push(pixelIndex, bestPosition, bestNormal, bestMaterial, bestFrontFace);
     }
     else
     {
-        pixelStates.HasHit[pixelIndex] = 0;
-        queues.PushEscape(pixelIndex);
+        pixelStates.Radiance[pixelIndex] += pixelStates.Throughput[pixelIndex] * skyColor;
+        pixelStates.Alive[pixelIndex] = 0;
     }
 }
 
-__global__ void ShadeHitsKernel(PixelStateSOA pixelStates, WavefrontQueues queues, uint32_t maxDepth)
+__global__ void ShadeHitsKernel(PixelStateSOA pixelStates, HitQueueSOA hitQueue, RayQueueSOA nextRayQueue, uint32_t maxDepth)
 {
     const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint32_t hitCount = QueueCount(queues.HitQueue);
+    __shared__ uint32_t hitCount;
+    if (threadIdx.x == 0)
+        hitCount = QueueCount(hitQueue);
+    __syncthreads();
     if (idx >= hitCount)
         return;
 
-    if (!queues.HitQueue.PixelIndices || !queues.RayQueue.PixelIndices || !queues.EscapeQueue.PixelIndices)
+    if (!hitQueue.IsValid() || !nextRayQueue.PixelIndices)
         return;
 
-    const uint32_t pixelIndex = queues.HitQueue.PixelIndices[idx];
-    if (!pixelStates.HasHit[pixelIndex])
-        return;
+    const uint32_t pixelIndex = hitQueue.PixelIndices[idx];
     if (!pixelStates.Alive[pixelIndex])
         return;
 
     const uint32_t depth = pixelStates.PathDepth[pixelIndex];
     const glm::vec3 throughput = pixelStates.Throughput[pixelIndex];
-    const MaterialHandle material = pixelStates.Materials[pixelIndex];
+    const MaterialHandle material = hitQueue.Materials[idx];
     glm::vec3 emitted(0.0f);
     material.Emit(emitted);
     glm::vec3 attenuation(0.0f);
@@ -266,14 +299,14 @@ __global__ void ShadeHitsKernel(PixelStateSOA pixelStates, WavefrontQueues queue
 
     Ray inRay;
     inRay.Origin = pixelStates.RayOrigins[pixelIndex];
-    inRay.Direction = glm::normalize(pixelStates.RayDirections[pixelIndex]);
+    inRay.Direction = pixelStates.RayDirections[pixelIndex];
 
     SurfaceInteraction si{};
-    si.Position = pixelStates.HitPositions[pixelIndex];
-    si.Normal = glm::normalize(pixelStates.HitNormals[pixelIndex]);
+    si.Position = hitQueue.HitPositions[idx];
+    si.Normal = glm::normalize(hitQueue.HitNormals[idx]);
     si.HasIntersection = true;
     si.Material = material;
-    si.IsFrontFace = pixelStates.IsFrontFace ? (pixelStates.IsFrontFace[pixelIndex] != 0) : true;
+    si.IsFrontFace = hitQueue.IsFrontFace[idx] != 0;
 
     glm::vec3 radiance = pixelStates.Radiance[pixelIndex];
     radiance += throughput * emitted;
@@ -282,7 +315,6 @@ __global__ void ShadeHitsKernel(PixelStateSOA pixelStates, WavefrontQueues queue
     if (!material.IsValid() || depth + 1 >= maxDepth)
     {
         pixelStates.Alive[pixelIndex] = 0;
-        queues.PushEscape(pixelIndex);
         return;
     }
 
@@ -290,7 +322,6 @@ __global__ void ShadeHitsKernel(PixelStateSOA pixelStates, WavefrontQueues queue
     if (!scattered)
     {
         pixelStates.Alive[pixelIndex] = 0;
-        queues.PushEscape(pixelIndex);
         return;
     }
 
@@ -300,25 +331,7 @@ __global__ void ShadeHitsKernel(PixelStateSOA pixelStates, WavefrontQueues queue
     pixelStates.Throughput[pixelIndex] = throughput * attenuation;
     pixelStates.RayOrigins[pixelIndex] = scatteredRay.Origin;
     pixelStates.RayDirections[pixelIndex] = scatteredRay.Direction;
-    queues.PushRay(pixelIndex);
-}
-
-__global__ void ShadeMissKernel(PixelStateSOA pixelStates, WavefrontQueues queues, glm::vec3 skyColor)
-{
-    const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint32_t missCount = QueueCount(queues.EscapeQueue);
-    if (idx >= missCount)
-        return;
-
-    if (!queues.EscapeQueue.PixelIndices)
-        return;
-
-    const uint32_t pixelIndex = queues.EscapeQueue.PixelIndices[idx];
-    if (!pixelStates.HasHit[pixelIndex])
-    {
-        pixelStates.Radiance[pixelIndex] += pixelStates.Throughput[pixelIndex] * skyColor;
-    }
-    pixelStates.Alive[pixelIndex] = 0;
+    nextRayQueue.Push(pixelIndex);
 }
 
 __global__ void BlitRadianceKernel(PixelStateSOA pixelStates, float* colors, uint32_t pixelCount)
@@ -369,42 +382,45 @@ void CudaWavefrontRenderer::ProgressiveRender()
     cudaMalloc(&deviceBuffer, bufferSize);
 
     EnsureDeviceState(pixelCount);
-    if (!m_PixelState.RayOrigins || !m_PixelState.RayDirections || !m_PixelState.Materials || !m_DeviceCamera
-        || !m_Queues.RayQueue.PixelIndices || !m_Queues.RayQueue.Count
-        || !m_Queues.EscapeQueue.PixelIndices || !m_Queues.EscapeQueue.Count
-        || !m_Queues.HitQueue.PixelIndices || !m_Queues.HitQueue.Count)
+    if (!m_PixelState.RayOrigins || !m_PixelState.RayDirections || !m_PixelState.Throughput || !m_PixelState.Radiance || !m_DeviceCamera
+        || !m_RayQueues[0].IsValid() || !m_RayQueues[1].IsValid()
+        || !m_Queues.HitQueue.IsValid())
         return;
 
-    m_Queues.ResetCounts();
     cudaMemcpy(m_DeviceCamera, m_Camera, sizeof(Camera), cudaMemcpyHostToDevice);
 
 
     const uint32_t threadsPerBlock = 256;
     const uint32_t blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
     WavefrontQueues queueView = m_Queues;
-    GenerateCameraRaysKernel<<<blocks, threadsPerBlock>>>(m_PixelState, queueView, m_DeviceCamera, width, height);
+
+    ResetCountKernel<<<1, 1>>>(m_RayQueues[0].Count);
+    ResetCountKernel<<<1, 1>>>(m_RayQueues[1].Count);
+    ResetCountKernel<<<1, 1>>>(m_Queues.HitQueue.Count);
+    GenerateCameraRaysKernel<<<blocks, threadsPerBlock>>>(m_PixelState, m_RayQueues[0], m_DeviceCamera, width, height);
 
     const glm::vec3 skyColor(0.4f, 0.3f, 0.6f);
     const uint32_t shadeBlocks = blocks;
     const uint32_t activeRayBlocks = blocks;
     const uint32_t maxDepth = 20;
 
+    int currRay = 0;
     for (uint32_t depth = 0; depth < maxDepth; ++depth)
     {
-        cudaMemset(m_Queues.HitQueue.Count, 0, sizeof(uint32_t));
-        cudaMemset(m_Queues.EscapeQueue.Count, 0, sizeof(uint32_t));
+        const int nextRay = 1 - currRay;
+        ResetCountKernel<<<1, 1>>>(m_Queues.HitQueue.Count);
+        ResetCountKernel<<<1, 1>>>(m_RayQueues[nextRay].Count);
 
-        IntersectClosestKernel<<<activeRayBlocks, threadsPerBlock>>>(m_PixelState, queueView, m_SceneBuffers.Device);
+        IntersectClosestKernel<<<activeRayBlocks, threadsPerBlock>>>(m_PixelState, m_RayQueues[currRay], queueView.HitQueue, m_SceneBuffers.Device, skyColor);
 
-        cudaMemset(m_Queues.RayQueue.Count, 0, sizeof(uint32_t));
+        ShadeHitsKernel<<<shadeBlocks, threadsPerBlock>>>(m_PixelState, queueView.HitQueue, m_RayQueues[nextRay], maxDepth);
 
-        ShadeHitsKernel<<<shadeBlocks, threadsPerBlock>>>(m_PixelState, queueView, maxDepth);
-        ShadeMissKernel<<<shadeBlocks, threadsPerBlock>>>(m_PixelState, queueView, skyColor);
+        currRay = nextRay;
 
-        uint32_t nextRayCount = 0;
-        cudaMemcpy(&nextRayCount, m_Queues.RayQueue.Count, sizeof(uint32_t), cudaMemcpyDeviceToHost);
-        if (nextRayCount == 0)
-            break;
+        // uint32_t nextRayCount = 0;
+        // cudaMemcpy(&nextRayCount, m_RayQueues[currRay].Count, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+        // if (nextRayCount == 0)
+        //     break;
     }
 
     BlitRadianceKernel<<<blocks, threadsPerBlock>>>(m_PixelState, deviceBuffer, pixelCount);
@@ -443,18 +459,9 @@ void CudaWavefrontRenderer::EnsureDeviceState(uint32_t pixelCount)
         reallocArray(m_PixelState.RayDirections, sizeof(glm::vec3));
         reallocArray(m_PixelState.Throughput, sizeof(glm::vec3));
         reallocArray(m_PixelState.Radiance, sizeof(glm::vec3));
-        reallocArray(m_PixelState.PendingEmission, sizeof(glm::vec3));
-        reallocArray(m_PixelState.HitPositions, sizeof(glm::vec3));
-        reallocArray(m_PixelState.HitNormals, sizeof(glm::vec3));
-        reallocArray(m_PixelState.PixelIndices, sizeof(uint32_t));
         reallocArray(m_PixelState.PathDepth, sizeof(uint32_t));
-        reallocArray(m_PixelState.RNGSeed, sizeof(uint32_t));
         reallocArray(m_PixelState.RNGStates, sizeof(curandState));
-        reallocArray(m_PixelState.HitDistance, sizeof(float));
-        reallocArray(m_PixelState.Materials, sizeof(MaterialHandle));
         reallocArray(m_PixelState.Alive, sizeof(uint8_t));
-        reallocArray(m_PixelState.HasHit, sizeof(uint8_t));
-        reallocArray(m_PixelState.IsFrontFace, sizeof(uint8_t));
         m_PixelState.Capacity = pixelCount;
 
         if (m_RNGSeed == 0)
@@ -466,21 +473,33 @@ void CudaWavefrontRenderer::EnsureDeviceState(uint32_t pixelCount)
         InitRNGStatesKernel<<<blocks, threadsPerBlock>>>(m_PixelState, pixelCount, m_RNGSeed);
     }
 
-    auto ensureQueueCapacity = [&](RayQueueSOA& queue) {
+    auto ensureRayQueueCapacity = [&](RayQueueSOA& queue) {
         if (pixelCount > queue.Capacity)
         {
             reallocArray(queue.PixelIndices, sizeof(uint32_t));
             queue.Capacity = pixelCount;
         }
         if (!queue.Count)
-        {
             cudaMalloc(&queue.Count, sizeof(uint32_t));
-        }
     };
 
-    ensureQueueCapacity(m_Queues.RayQueue);
-    ensureQueueCapacity(m_Queues.EscapeQueue);
-    ensureQueueCapacity(m_Queues.HitQueue);
+    auto ensureHitQueueCapacity = [&](HitQueueSOA& queue) {
+        if (pixelCount > queue.Capacity)
+        {
+            reallocArray(queue.PixelIndices, sizeof(uint32_t));
+            reallocArray(queue.HitPositions, sizeof(glm::vec3));
+            reallocArray(queue.HitNormals, sizeof(glm::vec3));
+            reallocArray(queue.Materials, sizeof(MaterialHandle));
+            reallocArray(queue.IsFrontFace, sizeof(uint8_t));
+            queue.Capacity = pixelCount;
+        }
+        if (!queue.Count)
+            cudaMalloc(&queue.Count, sizeof(uint32_t));
+    };
+
+    ensureRayQueueCapacity(m_RayQueues[0]);
+    ensureRayQueueCapacity(m_RayQueues[1]);
+    ensureHitQueueCapacity(m_Queues.HitQueue);
 
     if (!m_DeviceCamera)
     {
@@ -502,29 +521,30 @@ void CudaWavefrontRenderer::ReleaseDeviceState()
     freePtr(m_PixelState.RayDirections);
     freePtr(m_PixelState.Throughput);
     freePtr(m_PixelState.Radiance);
-    freePtr(m_PixelState.PendingEmission);
-    freePtr(m_PixelState.HitPositions);
-    freePtr(m_PixelState.HitNormals);
-    freePtr(m_PixelState.PixelIndices);
     freePtr(m_PixelState.PathDepth);
-    freePtr(m_PixelState.RNGSeed);
     freePtr(m_PixelState.RNGStates);
-    freePtr(m_PixelState.HitDistance);
-    freePtr(m_PixelState.Materials);
     freePtr(m_PixelState.Alive);
-    freePtr(m_PixelState.HasHit);
-    freePtr(m_PixelState.IsFrontFace);
     m_PixelState.Capacity = 0;
 
-    auto freeQueue = [&](RayQueueSOA& queue) {
+    auto freeRayQueue = [&](RayQueueSOA& queue) {
         freePtr(queue.PixelIndices);
         freePtr(queue.Count);
         queue.Capacity = 0;
     };
 
-    freeQueue(m_Queues.RayQueue);
-    freeQueue(m_Queues.EscapeQueue);
-    freeQueue(m_Queues.HitQueue);
+    auto freeHitQueue = [&](HitQueueSOA& queue) {
+        freePtr(queue.PixelIndices);
+        freePtr(queue.HitPositions);
+        freePtr(queue.HitNormals);
+        freePtr(queue.Materials);
+        freePtr(queue.IsFrontFace);
+        freePtr(queue.Count);
+        queue.Capacity = 0;
+    };
+
+    freeRayQueue(m_RayQueues[0]);
+    freeRayQueue(m_RayQueues[1]);
+    freeHitQueue(m_Queues.HitQueue);
 
     freePtr(m_DeviceCamera);
 }

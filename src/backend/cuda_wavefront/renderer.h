@@ -11,17 +11,8 @@ struct PixelState
     Ray Ray{};
     glm::vec3 Throughput{ 1.0f };
     glm::vec3 Radiance{ 0.0f };
-    glm::vec3 PendingEmission{ 0.0f };
-    glm::vec3 HitPosition{ 0.0f };
-    glm::vec3 HitNormal{ 0.0f };
-    uint32_t PixelIndex = 0;
     uint32_t PathDepth = 0;
-    uint32_t RNGSeed = 0;
-    float HitDistance = 0.0f;
-    MaterialHandle Material{};
     uint8_t Alive = 1;
-    uint8_t HasHit = 0;
-    uint8_t IsFrontFace = 1;
 };
 
 struct PixelStateSOA
@@ -30,18 +21,9 @@ struct PixelStateSOA
     glm::vec3* RayDirections = nullptr;
     glm::vec3* Throughput = nullptr;
     glm::vec3* Radiance = nullptr;
-    glm::vec3* PendingEmission = nullptr;
-    glm::vec3* HitPositions = nullptr;
-    glm::vec3* HitNormals = nullptr;
-    uint32_t* PixelIndices = nullptr;
     uint32_t* PathDepth = nullptr;
-    uint32_t* RNGSeed = nullptr;
     curandState* RNGStates = nullptr;
-    float* HitDistance = nullptr;
-    MaterialHandle* Materials = nullptr;
     uint8_t* Alive = nullptr;
-    uint8_t* HasHit = nullptr;
-    uint8_t* IsFrontFace = nullptr;
     uint32_t Capacity = 0;
 
     QUAL_GPU inline PixelState Load(uint32_t index) const;
@@ -56,21 +38,40 @@ struct RayQueueSOA
     uint32_t* Count = nullptr;
     uint32_t Capacity = 0;
 
-    QUAL_GPU inline bool IsValid() const { return PixelIndices && Count && Capacity > 0; }
+    QUAL_CPU_GPU inline bool IsValid() const { return PixelIndices && Count && Capacity > 0; }
     QUAL_GPU inline uint32_t AllocateSlot() const;
     QUAL_GPU inline void Push(uint32_t pixelIndex) const;
     QUAL_GPU inline uint32_t Size() const { return (Count && Capacity > 0) ? *Count : 0u; }
 };
 
+struct HitQueueSOA
+{
+    uint32_t* PixelIndices = nullptr;
+    glm::vec3* HitPositions = nullptr;
+    glm::vec3* HitNormals = nullptr;
+    MaterialHandle* Materials = nullptr;
+    uint8_t* IsFrontFace = nullptr;
+
+    uint32_t* Count = nullptr;
+    uint32_t Capacity = 0;
+
+    QUAL_CPU_GPU inline bool IsValid() const
+    {
+        return PixelIndices && HitPositions && HitNormals && Materials && IsFrontFace && Count && Capacity > 0;
+    }
+
+    QUAL_GPU inline uint32_t AllocateSlot() const;
+    QUAL_GPU inline void Push(uint32_t pixelIndex,
+                              const glm::vec3& hitPosition,
+                              const glm::vec3& hitNormal,
+                              const MaterialHandle& material,
+                              bool isFrontFace) const;
+    QUAL_GPU inline uint32_t Size() const { return (Count && Capacity > 0) ? *Count : 0u; }
+};
+
 struct WavefrontQueues
 {
-    RayQueueSOA RayQueue{};
-    RayQueueSOA EscapeQueue{};
-    RayQueueSOA HitQueue{};
-
-    QUAL_GPU inline void PushRay(uint32_t pixelIndex) const { RayQueue.Push(pixelIndex); }
-    QUAL_GPU inline void PushEscape(uint32_t pixelIndex) const { EscapeQueue.Push(pixelIndex); }
-    QUAL_GPU inline void PushHit(uint32_t pixelIndex) const { HitQueue.Push(pixelIndex); }
+    HitQueueSOA HitQueue{};
 
     void ResetCounts(cudaStream_t stream = nullptr) const;
 };
@@ -95,6 +96,7 @@ public:
     WavefrontSceneBuffers m_SceneBuffers{};
 
     PixelStateSOA m_PixelState{};
+    RayQueueSOA m_RayQueues[2]{};
     WavefrontQueues m_Queues{};
 
     Camera* m_DeviceCamera = nullptr;
