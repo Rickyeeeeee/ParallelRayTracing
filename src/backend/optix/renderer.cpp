@@ -437,140 +437,124 @@ void OptixRenderer::buildSBT()
     std::cout << "[OptixRenderer] SBT built\n";
 }
 
-void OptixRenderer::uploadSceneData()
+// Helper: Convert CPU Material to GPU DeviceMaterial
+static DeviceMaterial ConvertMaterial(const Material* cpuMat)
 {
-    // Create test scene matching CPU renderer style
+    DeviceMaterial dMat = {};
+    dMat.albedo = make_float3(0.8f, 0.8f, 0.8f); // Default值
+    dMat.type = MaterialType::Lambertian;
+    
+    if (!cpuMat) return dMat;
+    
+    // 判斷材質類型並複製數值
+    if (auto m = dynamic_cast<const LambertianMaterial*>(cpuMat)) {
+        dMat.type = MaterialType::Lambertian;
+        auto albedo = m->GetAlbedo();
+        dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
+    }
+    else if (auto m = dynamic_cast<const MetalMaterial*>(cpuMat)) {
+        dMat.type = MaterialType::Metal;
+        auto albedo = m->GetAlbedo();
+        dMat.albedo = make_float3(albedo.x, albedo.y, albedo.z);
+        dMat.roughness = m->GetRoughness();
+    }
+    else if (auto m = dynamic_cast<const DielectricMaterial*>(cpuMat)) {
+        dMat.type = MaterialType::Dielectric;
+        dMat.albedo = make_float3(1.0f, 1.0f, 1.0f);
+        dMat.refractionIndex = m->GetRefractionIndex();
+        //if (dMat.refractionIndex < 1.0f) dMat.refractionIndex = 1.5f;
+    }
+    else if (auto m = dynamic_cast<const EmissiveMaterial*>(cpuMat)) {
+        dMat.type = MaterialType::Emissive;
+        auto emit = m->GetEmission();
+        dMat.emission = make_float3(emit.x, emit.y, emit.z);
+    }
+    
+    return dMat;
+}
+
+void OptixRenderer::uploadSceneData(std::vector<SphereData>& outputSpheres, std::vector<QuadData>& outputQuads)
+{
     std::vector<SphereData> spheres;
     std::vector<QuadData> quads;
     std::vector<DeviceMaterial> materials;
-    
-    // Ground - material 0
+
+    if (!m_Scene) return;
+
+    // 讀取 main.cpp 傳進來的場景
+    const auto& primitiveList = m_Scene->GetPrimitives();
+    const auto& primitives = primitiveList.GetList();
+
+    for (const auto& prim : primitives)
     {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Lambertian;
-        mat.albedo = make_float3(0.7f, 0.7f, 0.4f);
-        mat.roughness = 0.0f;
-        mat.refractionIndex = 1.0f;
-        mat.emission = make_float3(0.0f, 0.0f, 0.0f);
-        materials.push_back(mat);
+        auto simplePrim = dynamic_cast<SimplePrimitive*>(prim.get());
+        if (!simplePrim) continue;
         
-        QuadData quad;
-        quad.corner = make_float3(-10.0f, 0.0f, -10.0f);
-        quad.u = make_float3(20.0f, 0.0f, 0.0f);
-        quad.v = make_float3(0.0f, 0.0f, 20.0f);
-        quad.normal = make_float3(0.0f, 1.0f, 0.0f);
-        quad.materialIndex = 0;
-        quads.push_back(quad);
-    }
-    
-    // Green sphere - material 1
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Lambertian;
-        mat.albedo = make_float3(0.2f, 1.0f, 0.2f);
-        materials.push_back(mat);
+        int matIndex = (int)materials.size();
+        materials.push_back(ConvertMaterial(&simplePrim->GetMaterial()));
+
+        glm::mat4 mat = simplePrim->GetTransform().GetMat();
         
-        SphereData sphere;
-        sphere.center = make_float3(4.0f, 1.0f, 0.0f);
-        sphere.radius = 1.0f;
-        sphere.materialIndex = 1;
-        spheres.push_back(sphere);
+        glm::vec3 position = glm::vec3(mat[3]);
+        float scale = glm::length(glm::vec3(mat[0]));
+
+        const Shape& shape = simplePrim->GetShape();
+
+        if (auto s = dynamic_cast<const Circle*>(&shape))
+        {
+            SphereData sData;
+            sData.center = make_float3(position.x, position.y, position.z);
+            sData.radius = s->GetRadius() * scale; // 半徑 * 縮放
+            sData.materialIndex = matIndex;
+            spheres.push_back(sData);
+        }
+        else if (auto q = dynamic_cast<const Quad*>(&shape))
+        {
+            QuadData qData;
+            
+            glm::vec4 localCorner(-q->GetWidth()/2.0f, 0.0f, -q->GetHeight()/2.0f, 1.0f);
+            glm::vec4 localU(q->GetWidth(), 0.0f, 0.0f, 0.0f);
+            glm::vec4 localV(0.0f, 0.0f, q->GetHeight(), 0.0f);
+            
+            glm::vec3 worldCorner = glm::vec3(mat * localCorner);
+            glm::vec3 worldU = glm::vec3(mat * localU);
+            glm::vec3 worldV = glm::vec3(mat * localV);
+            
+            qData.corner = make_float3(worldCorner.x, worldCorner.y, worldCorner.z);
+            qData.u = make_float3(worldU.x, worldU.y, worldU.z);
+            qData.v = make_float3(worldV.x, worldV.y, worldV.z);
+            
+            float3 uVec = qData.u;
+            float3 vVec = qData.v;
+            float3 crossResult = cross(uVec, vVec);
+            qData.normal = normalize(crossResult);
+            
+            qData.materialIndex = matIndex;
+            quads.push_back(qData);
+        }
     }
-    
-    // Red sphere - material 2
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Lambertian;
-        mat.albedo = make_float3(1.0f, 0.2f, 0.2f);
-        materials.push_back(mat);
-        
-        SphereData sphere;
-        sphere.center = make_float3(-4.0f, 1.0f, 0.0f);
-        sphere.radius = 1.0f;
-        sphere.materialIndex = 2;
-        spheres.push_back(sphere);
-    }
-    
-    // Glass sphere - material 3
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Dielectric;
-        mat.albedo = make_float3(1.0f, 1.0f, 1.0f);
-        mat.refractionIndex = GLASS_REFRACTION_INDEX;  // From CPU scene.h
-        materials.push_back(mat);
-        
-        SphereData sphere;
-        sphere.center = make_float3(0.0f, 1.0f, 4.0f);
-        sphere.radius = 1.0f;
-        sphere.materialIndex = 3;
-        spheres.push_back(sphere);
-    }
-    
-    // Metal sphere - material 4
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Metal;
-        mat.albedo = make_float3(1.0f, 0.7f, 0.8f);
-        mat.roughness = METAL_ROUGHNESS;  // Mirror-like surface
-        materials.push_back(mat);
-        
-        SphereData sphere;
-        sphere.center = make_float3(0.0f, 1.0f, -4.0f);
-        sphere.radius = 1.0f;
-        sphere.materialIndex = 4;
-        spheres.push_back(sphere);
-    }
-    
-    // Light quads - materials 5 and 6
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Emissive;
-        // Match CPU scene.h quad1: EmissiveMaterial(glm::vec3{ 3.0f, 4.0f, 2.0f })
-        mat.emission = make_float3(3.0f, 4.0f, 2.0f);
-        materials.push_back(mat);
-        
-        QuadData quad;
-        quad.corner = make_float3(-8.0f, 7.0f, 3.0f);
-        quad.u = make_float3(8.0f, 0.0f, 0.0f);
-        quad.v = make_float3(0.0f, 0.0f, 8.0f);
-        quad.normal = make_float3(0.0f, -1.0f, 0.0f);
-        quad.materialIndex = 5;
-        quads.push_back(quad);
-    }
-    {
-        DeviceMaterial mat;
-        mat.type = MaterialType::Emissive;
-        mat.emission = make_float3(3.0f, 2.0f, 1.0f);
-        materials.push_back(mat);
-        
-        QuadData quad;
-        quad.corner = make_float3(0.0f, 7.0f, 3.0f);
-        quad.u = make_float3(8.0f, 0.0f, 0.0f);
-        quad.v = make_float3(0.0f, 0.0f, 8.0f);
-        quad.normal = make_float3(0.0f, -1.0f, 0.0f);
-        quad.materialIndex = 6;
-        quads.push_back(quad);
-    }
-    
-    // Upload to GPU
+
+    outputSpheres = spheres;
+    outputQuads = quads;
+
     m_NumSpheres = spheres.size();
     m_NumQuads = quads.size();
     m_NumMaterials = materials.size();
     
-    if (m_NumSpheres > 0) {
-        size_t size = sizeof(SphereData) * m_NumSpheres;
+    if (!spheres.empty()) {
+        size_t size = sizeof(SphereData) * spheres.size();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_SphereData), size));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_d_SphereData), spheres.data(), size, cudaMemcpyHostToDevice));
     }
     
-    if (m_NumQuads > 0) {
-        size_t size = sizeof(QuadData) * m_NumQuads;
+    if (!quads.empty()) {
+        size_t size = sizeof(QuadData) * quads.size();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_QuadData), size));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_d_QuadData), quads.data(), size, cudaMemcpyHostToDevice));
     }
     
-    if (m_NumMaterials > 0) {
-        size_t size = sizeof(DeviceMaterial) * m_NumMaterials;
+    if (!materials.empty()) {
+        size_t size = sizeof(DeviceMaterial) * materials.size();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_Materials), size));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_d_Materials), materials.data(), size, cudaMemcpyHostToDevice));
     }
@@ -578,40 +562,35 @@ void OptixRenderer::uploadSceneData()
     std::cout << "[OptixRenderer] Scene: " << m_NumSpheres << " spheres, " << m_NumQuads << " quads\n";
 }
 
-void OptixRenderer::buildAccelerationStructure()
+void OptixRenderer::buildAccelerationStructure(const std::vector<SphereData>& spheres, const std::vector<QuadData>& quads)
 {
     std::vector<OptixInstance> instances;
     unsigned int instanceId = 0;
     
-    // ==== Build Sphere GAS ====
-    if (m_NumSpheres > 0) {
-        std::vector<OptixAabb> aabbs(m_NumSpheres);
-        float3 centers[] = {
-            {4.0f, 1.0f, 0.0f},
-            {-4.0f, 1.0f, 0.0f},
-            {0.0f, 1.0f, 4.0f},
-            {0.0f, 1.0f, -4.0f}
-        };
+    if (!spheres.empty()) {
+        std::vector<OptixAabb> aabbs(spheres.size());
         
-        for (size_t i = 0; i < m_NumSpheres; ++i) {
-            float r = 1.0f;
-            aabbs[i].minX = centers[i].x - r;
-            aabbs[i].minY = centers[i].y - r;
-            aabbs[i].minZ = centers[i].z - r;
-            aabbs[i].maxX = centers[i].x + r;
-            aabbs[i].maxY = centers[i].y + r;
-            aabbs[i].maxZ = centers[i].z + r;
+        for (size_t i = 0; i < spheres.size(); ++i) {
+            float3 center = spheres[i].center;
+            float r = spheres[i].radius;
+            
+            aabbs[i].minX = center.x - r;
+            aabbs[i].minY = center.y - r;
+            aabbs[i].minZ = center.z - r;
+            aabbs[i].maxX = center.x + r;
+            aabbs[i].maxY = center.y + r;
+            aabbs[i].maxZ = center.z + r;
         }
         
         CUdeviceptr d_aabbBuffer;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_aabbBuffer), sizeof(OptixAabb) * m_NumSpheres));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_aabbBuffer), aabbs.data(), sizeof(OptixAabb) * m_NumSpheres, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_aabbBuffer), sizeof(OptixAabb) * spheres.size()));
+        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_aabbBuffer), aabbs.data(), sizeof(OptixAabb) * spheres.size(), cudaMemcpyHostToDevice));
         
         uint32_t sphereFlags = OPTIX_GEOMETRY_FLAG_NONE;
         OptixBuildInput sphereInput = {};
         sphereInput.type = OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
         sphereInput.customPrimitiveArray.aabbBuffers = &d_aabbBuffer;
-        sphereInput.customPrimitiveArray.numPrimitives = static_cast<unsigned int>(m_NumSpheres);
+        sphereInput.customPrimitiveArray.numPrimitives = static_cast<unsigned int>(spheres.size());
         sphereInput.customPrimitiveArray.flags = &sphereFlags;
         sphereInput.customPrimitiveArray.numSbtRecords = 1;
         
@@ -637,50 +616,47 @@ void OptixRenderer::buildAccelerationStructure()
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_tempBuffer)));
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_aabbBuffer)));
         
-        // Create instance for spheres - SBT offset 0
+        // Create instance for spheres
         OptixInstance sphereInstance = {};
         sphereInstance.transform[0] = 1.0f; sphereInstance.transform[5] = 1.0f; sphereInstance.transform[10] = 1.0f;
         sphereInstance.instanceId = instanceId++;
-        sphereInstance.sbtOffset = 0;  // First hit group record (HitSpherePG)
+        sphereInstance.sbtOffset = 0;
         sphereInstance.visibilityMask = 255;
         sphereInstance.flags = OPTIX_INSTANCE_FLAG_NONE;
         sphereInstance.traversableHandle = m_SphereGasHandle;
         instances.push_back(sphereInstance);
     }
     
-    // ==== Build Quad GAS ====
-    if (m_NumQuads > 0) {
-        std::vector<OptixAabb> aabbs(m_NumQuads);
+    if (!quads.empty()) {
+        std::vector<OptixAabb> aabbs(quads.size());
         
-        struct QuadInfo { float3 corner, u, v; };
-        QuadInfo quadInfos[] = {
-            {{-10.0f, 0.0f, -10.0f}, {20.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 20.0f}},
-            {{-8.0f, 7.0f, 3.0f}, {8.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 8.0f}},
-            {{0.0f, 7.0f, 3.0f}, {8.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 8.0f}}
-        };
-        
-        for (size_t i = 0; i < m_NumQuads; ++i) {
-            float3 c = quadInfos[i].corner;
-            float3 u = quadInfos[i].u;
-            float3 v = quadInfos[i].v;
+        for (size_t i = 0; i < quads.size(); ++i) {
+            float3 c = quads[i].corner;
+            float3 u = quads[i].u;
+            float3 v = quads[i].v;
             
-            aabbs[i].minX = fminf(fminf(c.x, c.x + u.x), fminf(c.x + v.x, c.x + u.x + v.x)) - 0.01f;
-            aabbs[i].minY = fminf(fminf(c.y, c.y + u.y), fminf(c.y + v.y, c.y + u.y + v.y)) - 0.01f;
-            aabbs[i].minZ = fminf(fminf(c.z, c.z + u.z), fminf(c.z + v.z, c.z + u.z + v.z)) - 0.01f;
-            aabbs[i].maxX = fmaxf(fmaxf(c.x, c.x + u.x), fmaxf(c.x + v.x, c.x + u.x + v.x)) + 0.01f;
-            aabbs[i].maxY = fmaxf(fmaxf(c.y, c.y + u.y), fmaxf(c.y + v.y, c.y + u.y + v.y)) + 0.01f;
-            aabbs[i].maxZ = fmaxf(fmaxf(c.z, c.z + u.z), fmaxf(c.z + v.z, c.z + u.z + v.z)) + 0.01f;
+            float3 p0 = c;
+            float3 p1 = make_float3(c.x + u.x, c.y + u.y, c.z + u.z);
+            float3 p2 = make_float3(c.x + v.x, c.y + v.y, c.z + v.z);
+            float3 p3 = make_float3(c.x + u.x + v.x, c.y + u.y + v.y, c.z + u.z + v.z);
+            
+            aabbs[i].minX = fminf(fminf(p0.x, p1.x), fminf(p2.x, p3.x)) - 0.01f;
+            aabbs[i].minY = fminf(fminf(p0.y, p1.y), fminf(p2.y, p3.y)) - 0.01f;
+            aabbs[i].minZ = fminf(fminf(p0.z, p1.z), fminf(p2.z, p3.z)) - 0.01f;
+            aabbs[i].maxX = fmaxf(fmaxf(p0.x, p1.x), fmaxf(p2.x, p3.x)) + 0.01f;
+            aabbs[i].maxY = fmaxf(fmaxf(p0.y, p1.y), fmaxf(p2.y, p3.y)) + 0.01f;
+            aabbs[i].maxZ = fmaxf(fmaxf(p0.z, p1.z), fmaxf(p2.z, p3.z)) + 0.01f;
         }
         
         CUdeviceptr d_aabbBuffer;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_aabbBuffer), sizeof(OptixAabb) * m_NumQuads));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_aabbBuffer), aabbs.data(), sizeof(OptixAabb) * m_NumQuads, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_aabbBuffer), sizeof(OptixAabb) * quads.size()));
+        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_aabbBuffer), aabbs.data(), sizeof(OptixAabb) * quads.size(), cudaMemcpyHostToDevice));
         
         uint32_t quadFlags = OPTIX_GEOMETRY_FLAG_NONE;
         OptixBuildInput quadInput = {};
         quadInput.type = OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
         quadInput.customPrimitiveArray.aabbBuffers = &d_aabbBuffer;
-        quadInput.customPrimitiveArray.numPrimitives = static_cast<unsigned int>(m_NumQuads);
+        quadInput.customPrimitiveArray.numPrimitives = static_cast<unsigned int>(quads.size());
         quadInput.customPrimitiveArray.flags = &quadFlags;
         quadInput.customPrimitiveArray.numSbtRecords = 1;
         
@@ -706,11 +682,10 @@ void OptixRenderer::buildAccelerationStructure()
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_tempBuffer)));
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_aabbBuffer)));
         
-        // Create instance for quads - SBT offset 1
         OptixInstance quadInstance = {};
         quadInstance.transform[0] = 1.0f; quadInstance.transform[5] = 1.0f; quadInstance.transform[10] = 1.0f;
         quadInstance.instanceId = instanceId++;
-        quadInstance.sbtOffset = 1;  // Second hit group record (HitQuadPG)
+        quadInstance.sbtOffset = 1;  
         quadInstance.visibilityMask = 255;
         quadInstance.flags = OPTIX_INSTANCE_FLAG_NONE;
         quadInstance.traversableHandle = m_QuadGasHandle;
@@ -722,7 +697,6 @@ void OptixRenderer::buildAccelerationStructure()
         return;
     }
     
-    // ==== Build IAS ====
     CUdeviceptr d_instances;
     size_t instancesSize = sizeof(OptixInstance) * instances.size();
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_instances), instancesSize));
@@ -838,19 +812,24 @@ void OptixRenderer::Init(Film& film, const Scene& scene, const Camera& camera)
     try {
         initCUDA();
         initOptix();
-        uploadSceneData();
+        
+        std::vector<SphereData> hostSpheres;
+        std::vector<QuadData> hostQuads;
+        
+        uploadSceneData(hostSpheres, hostQuads);
+        
         createModule();
         createProgramGroups();
         createPipeline();
-        buildAccelerationStructure();
+        
+        buildAccelerationStructure(hostSpheres, hostQuads);
+        
         buildSBT();
         
-        // Allocate output buffers
         size_t bufferSize = sizeof(float3) * film.GetWidth() * film.GetHeight();
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_ColorBuffer), bufferSize));
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_d_AccumBuffer), bufferSize));
         
-        // Initialize accumulation buffer to zero
         CUDA_CHECK(cudaMemset(reinterpret_cast<void*>(m_d_AccumBuffer), 0, bufferSize));
         
         // Create OpenGL PBO for Zero-Copy rendering

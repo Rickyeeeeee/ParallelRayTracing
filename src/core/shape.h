@@ -32,6 +32,8 @@ public:
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
     virtual AABB GetAABB(Transform* transform) const override;
     
+    float GetRadius() const { return m_Radius; }
+    
     private:
     float m_Radius{ 1.0f };
 };
@@ -43,6 +45,9 @@ class Quad : public Shape
     
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
     virtual AABB GetAABB(Transform* transform) const override;
+
+    float GetWidth() const { return m_Width; }
+    float GetHeight() const { return m_Height; }
 
 private:
     float m_Width;

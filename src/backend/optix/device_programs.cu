@@ -10,9 +10,6 @@ extern "C" {
     __constant__ LaunchParams params;
 }
 
-//------------------------------------------------------------------------------
-// Helper functions
-//------------------------------------------------------------------------------
 
 // Get radiance payload from optix registers
 static __forceinline__ __device__ RadiancePayload* getPayload()
@@ -66,9 +63,7 @@ static __forceinline__ __device__ float3 refract(const float3& uv, const float3&
     return rOutPerp + rOutParallel;
 }
 
-//------------------------------------------------------------------------------
-// Material Processing (Unified for all geometry types)
-//------------------------------------------------------------------------------
+
 
 static __forceinline__ __device__ void ApplyMaterial(
     const DeviceMaterial& mat,
@@ -160,9 +155,7 @@ static __forceinline__ __device__ void ApplyMaterial(
     }
 }
 
-//------------------------------------------------------------------------------
-// Ray Generation Program
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __raygen__renderFrame()
 {
@@ -234,10 +227,7 @@ extern "C" __global__ void __raygen__renderFrame()
         rayDirection = payload.direction;
     }
     
-    // GPU Temporal Accumulation for Noise-Free Convergence
-    // ---------------------------------------------------
-    
-    // 1. Read previous accumulated value or start fresh
+
     float3 accumColor = finalColor;
     
     if (params.frameIndex > 0)
@@ -271,9 +261,7 @@ extern "C" __global__ void __raygen__renderFrame()
     params.colorBuffer[pixelIndex] = averagedColor;
 }
 
-//------------------------------------------------------------------------------
-// Miss Program (Sky/Background)
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __miss__radiance()
 {
@@ -285,9 +273,7 @@ extern "C" __global__ void __miss__radiance()
     payload->done = true;
 }
 
-//------------------------------------------------------------------------------
-// Closest Hit Program for Spheres (Custom Primitives)
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __closesthit__sphere()
 {
@@ -313,9 +299,7 @@ extern "C" __global__ void __closesthit__sphere()
     ApplyMaterial(mat, hitPoint, geometryNormal, rayDir, payload);
 }
 
-//------------------------------------------------------------------------------
-// Intersection Program for Spheres
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __intersection__sphere()
 {
@@ -355,9 +339,7 @@ extern "C" __global__ void __intersection__sphere()
     }
 }
 
-//------------------------------------------------------------------------------
-// Closest Hit Program for Quads (Custom Primitives)
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __closesthit__quad()
 {
@@ -381,9 +363,6 @@ extern "C" __global__ void __closesthit__quad()
     ApplyMaterial(mat, hitPoint, quad.normal, rayDir, payload);
 }
 
-//------------------------------------------------------------------------------
-// Intersection Program for Quads
-//------------------------------------------------------------------------------
 
 extern "C" __global__ void __intersection__quad()
 {
@@ -421,9 +400,7 @@ extern "C" __global__ void __intersection__quad()
     }
 }
 
-//------------------------------------------------------------------------------
-// Closest Hit Program for Triangles (Built-in)
-//------------------------------------------------------------------------------
+
 
 extern "C" __global__ void __closesthit__triangle()
 {

@@ -17,6 +17,8 @@
 
 // Forward declarations
 struct LaunchParams;
+struct SphereData;
+struct QuadData;
 class OpenGLTexture;
 
 class OptixRenderer : public Renderer
@@ -41,8 +43,8 @@ private:
     void createProgramGroups();
     void createPipeline();
     void buildSBT();
-    void uploadSceneData();
-    void buildAccelerationStructure();
+    void uploadSceneData(std::vector<SphereData>& outputSpheres, std::vector<QuadData>& outputQuads);
+    void buildAccelerationStructure(const std::vector<SphereData>& spheres, const std::vector<QuadData>& quads);
     void updateLaunchParams();
     void cleanup();
 
