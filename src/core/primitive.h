@@ -19,9 +19,12 @@ public:
         : m_Shape(shape), m_Material(material), m_Transform(transform) {}
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
     Shape& GetShape() { return *m_Shape; }
-    Material& GetMaterial()                     { return *m_Material; }
+    const Shape& GetShape() const { return *m_Shape; }
+    Material& GetMaterial() { return *m_Material; }
+    const Material& GetMaterial() const { return *m_Material; }
+    std::shared_ptr<Material> GetMaterialPtr() const { return m_Material; }
 
-    Transform GetTransform() const              { return m_Transform; }
+    Transform GetTransform() const { return m_Transform; }
     void SetTransform(const Transform& trans)   { m_Transform = trans; }
     void SetTransform(
         const glm::vec3& scale, 
@@ -53,6 +56,10 @@ public:
     }
 
     virtual void Intersect(const Ray& ray, SurfaceInteraction* intersect) const override;
+
+    // Getter for OptiX renderer
+    const std::vector<std::shared_ptr<Primitive>>& GetList() const { return m_List; }
+
 private:
     std::vector<std::shared_ptr<Primitive>> m_List;
 };

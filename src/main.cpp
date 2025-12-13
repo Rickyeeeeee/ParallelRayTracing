@@ -225,7 +225,7 @@ int main() {
         
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapInterval(1);
+        glfwSwapInterval(0);
         glfwSwapBuffers(window);
 
         lastTime = currentTime;

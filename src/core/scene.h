@@ -147,11 +147,14 @@ public:
         // m_BVH->Intersect(ray, intersect);
     }
 
-    // FOr debug purposes
+    // For debug purposes
     // BVH& GetBVH() 
     // {
     //     return *m_BVH;
     // }
+
+    // Getter for OptiX renderer to access scene data
+    const PrimitiveList& GetPrimitives() const { return m_Primitives; }
 
 private:
     PrimitiveList m_Primitives;

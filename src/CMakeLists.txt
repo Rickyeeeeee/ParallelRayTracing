@@ -13,7 +13,7 @@ file(GLOB CPP_SOURCE
     backend/cpu/*.cu
     backend/cuda_megakernel/*.cu
     backend/cuda_wavefront/*.cu
-    backend/optix/*.cu
+    # NOTE: backend/optix/*.cu is NOT included - OptiX device programs must be compiled as PTX only
     imgui_impl/*.cpp
     opengl/*.cpp
     )
@@ -43,6 +43,7 @@ file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}" PROJECT_ROOT_DIR)
 target_compile_definitions(Viewer PRIVATE
     PROJECT_ROOT_DIR="${PROJECT_ROOT_DIR}"
     ASSETS_DIR="${PROJECT_ROOT_DIR}/assets"
+    PTX_DIR="${CMAKE_BINARY_DIR}/src"
 )
 
 # set_target_properties(Viewer PROPERTIES
@@ -67,3 +68,36 @@ target_include_directories(Viewer PRIVATE
     ${PROJECT_SOURCE_DIR}/external/tinyply/source
     ${OPTIX_INCLUDE_DIR}
 )
+
+#------------------------------------------------------------------------------
+# OptiX PTX Compilation
+#------------------------------------------------------------------------------
+find_program(CUDA_NVCC_EXECUTABLE nvcc)
+
+if(CUDA_NVCC_EXECUTABLE)
+    set(OPTIX_PTX_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/backend/optix/device_programs.cu")
+    set(OPTIX_PTX_OUTPUT "${CMAKE_BINARY_DIR}/src/device_programs.ptx")
+    
+    add_custom_command(
+        OUTPUT ${OPTIX_PTX_OUTPUT}
+        COMMAND ${CUDA_NVCC_EXECUTABLE}
+            -ptx
+            -O3
+            --use_fast_math
+            -arch=sm_89
+            -I${OPTIX_INCLUDE_DIR}
+            -I${CMAKE_CURRENT_SOURCE_DIR}/backend/optix
+            -I${CUDAToolkit_INCLUDE_DIRS}
+            -o ${OPTIX_PTX_OUTPUT}
+            ${OPTIX_PTX_SOURCE}
+        DEPENDS ${OPTIX_PTX_SOURCE}
+        COMMENT "Compiling OptiX PTX: device_programs.cu -> device_programs.ptx"
+        VERBATIM
+    )
+    
+    add_custom_target(OptiXPTX ALL DEPENDS ${OPTIX_PTX_OUTPUT})
+    add_dependencies(Viewer OptiXPTX)
+    
+    message(STATUS "OptiX PTX compilation enabled: ${OPTIX_PTX_OUTPUT}")
+endif()
+
