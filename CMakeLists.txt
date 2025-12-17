@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Force the CUDA language to use the NVIDIA nvcc compiler instead of falling back
+# to clang's CUDA front-end on systems where that might be the default.
+find_program(CUDA_NVCC_EXECUTABLE nvcc HINTS ENV CUDA_BIN_PATH ENV CUDA_PATH PATH_SUFFIXES bin)
+if (NOT CUDA_NVCC_EXECUTABLE)
+    message(FATAL_ERROR "Unable to locate the 'nvcc' executable. Install the CUDA toolkit or set CUDA_BIN_PATH.")
+endif()
+
+if (NOT DEFINED CMAKE_CUDA_COMPILER OR NOT CMAKE_CUDA_COMPILER MATCHES "nvcc")
+    message(STATUS "Configuring CMake to use nvcc at: ${CUDA_NVCC_EXECUTABLE}")
+    set(CMAKE_CUDA_COMPILER "${CUDA_NVCC_EXECUTABLE}" CACHE FILEPATH "CUDA compiler used to compile CUDA sources" FORCE)
+endif()
+
 project(ParallelRayTracing
     VERSION 0.1
     LANGUAGES CXX CUDA)

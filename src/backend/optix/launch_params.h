@@ -4,7 +4,8 @@
 // This file is included by both CPU and GPU code
 
 #include <cuda_runtime.h>
-#include <optix.h>
+#include <optix_types.h>
+#include <cstdint>
 
 // CUDA already provides make_float3, make_float2, etc. in vector_functions.hpp
 // We only need to add operators that CUDA doesn't provide

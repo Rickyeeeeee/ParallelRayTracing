@@ -1,4 +1,5 @@
 #include "mesh.h"
+#include <cstring>
 #include <fstream>
 #include <tinyply.h>
 

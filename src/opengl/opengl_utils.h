@@ -1,5 +1,5 @@
 #pragma once
-#include <Core/Core.h>
+#include <core/core.h>
 #include <glad/glad.h>
 
 #include <memory>

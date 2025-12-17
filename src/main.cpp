@@ -275,7 +275,7 @@ int main() {
         // Calculate statistics
         float maxTotal = 0.0f;
         for (float val : totalHistory)
-            maxTotal = max(maxTotal, val);
+            maxTotal = std::max(maxTotal, val);
         
         if (maxTotal < 1.0f) maxTotal = 1.0f; // Minimum scale
         
@@ -428,7 +428,7 @@ int main() {
         if (ImGui::BeginChild("FPSGraph", ImVec2(0, childHeight), true)) {
             float maxFPS = 0.0f;
             for (float val : fpsHistory)
-                maxFPS = max(maxFPS, val);
+                maxFPS = std::max(maxFPS, val);
             if (maxFPS < 10.0f) maxFPS = 10.0f;
             
             ImGui::Text("FPS - Avg: %.1f", avgFPS);

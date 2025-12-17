@@ -1,6 +1,7 @@
 // OptiX Device Programs (PTX Shaders)
 // Compiled to PTX and loaded at runtime
 
+#include <cuda_runtime.h>
 #include <optix.h>
 #include "launch_params.h"
 #include "device_types.h"
