@@ -2,6 +2,11 @@
 
 #include <stdint.h>
 #include <string>
+#include <algorithm>
+
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
 
 #ifndef ASSETS_DIR
 #define ASSETS_DIR "."
